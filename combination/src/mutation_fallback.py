@@ -141,3 +141,130 @@ class MutationFallback:
                 variants.append(attack_text)
                 mutators_used.append(f"{mutator_name}_error")
         return variants
+
+
+def run_mutation_fallback(
+    fallback: MutationFallback,
+    best_attack_data: dict,
+    scenario,
+    extractor,
+    chat_fn,
+    strip_fn,
+) -> MutationFallbackResult:
+    """
+    Execute the full mutation fallback pipeline:
+
+    1. Generate N mutated variants of the failed attack.
+    2. Build victim LLM messages (defense sandwich + each variant).
+    3. Batch-query the victim LLM.
+    4. Run the extractor on each response.
+    5. Verify extracted candidates against ground truth.
+    6. Return the first success, or a failure result.
+
+    Args:
+        fallback:          MutationFallback instance (holds config).
+        best_attack_data:  Rich dict from agent.best_attack_data with keys:
+                           attack, response, fallback_score, strategy, attempt_num, outcome.
+        scenario:          DefenseScenario with opening_defense, closing_defense, access_code.
+        extractor:         SensitiveInfoExtractor instance (already has ground_truth set).
+        chat_fn:           Callable[[list[list[dict]]], list[str]] — the victim LLM batch query.
+        strip_fn:          Callable[[str], str] — strips few-shot artifacts from responses.
+
+    Returns:
+        MutationFallbackResult with variants, responses, and success info.
+    """
+    attack_text = best_attack_data["attack"]
+    source_strategy = best_attack_data.get("strategy", "unknown")
+    source_score = best_attack_data.get("fallback_score", 0.0)
+
+    print(f"\n{'=' * 70}")
+    print(f"🔀 MUTATION FALLBACK: Generating {fallback.num_variants} variants")
+    print(f"{'=' * 70}")
+    print(f"  Original attack ({len(attack_text)} chars): {attack_text[:80]}...")
+    print(f"  Source strategy: {source_strategy}")
+    print(f"  Fallback score:  {source_score:.2f} (judge-independent)")
+    print(f"  Mutator pool: {fallback.mutator_names}")
+
+    # Step 1: Generate variants
+    variants = fallback.generate_variants(attack_text)
+    print(f"  Generated {len(variants)} variants")
+
+    # Step 2: Build messages for victim LLM
+    system_content = (
+        f"{scenario.opening_defense or ''}\n\n{scenario.closing_defense or ''}"
+    )
+    messages_batch = [
+        [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": variant},
+        ]
+        for variant in variants
+    ]
+
+    # Step 3: Query victim LLM
+    print(f"  Querying victim LLM with {len(variants)} variants...")
+    responses = chat_fn(messages_batch)
+    clean_responses = [strip_fn(r) for r in responses]
+
+    # Step 4 & 5: Extract and verify
+    extraction_results = []
+    result = MutationFallbackResult(
+        variants=variants,
+        responses=clean_responses,
+        source_strategy=source_strategy,
+        source_fallback_score=source_score,
+    )
+
+    for i, (variant, response, clean_resp) in enumerate(
+        zip(variants, responses, clean_responses)
+    ):
+        # Check ground truth leak
+        gt_leaked = extractor.check_ground_truth_leak(response)
+
+        # Run extraction
+        extraction = extractor.extract(response, env=None)
+        extraction_results.append(extraction)
+
+        best_candidate = extraction.get("best_candidate")
+        verified = extraction.get("verified", False)
+
+        # Verify against ground truth
+        success_exact = gt_leaked
+        success_extractor = False
+        if best_candidate:
+            success_extractor = extractor.verify(
+                best_candidate, scenario.access_code
+            )
+
+        real_success = success_exact or success_extractor or verified
+
+        mutator_label = fallback.mutator_names[i % len(fallback.mutator_names)]
+        status = "✅ SUCCESS" if real_success else "❌ MISS"
+        print(
+            f"  [{i+1}/{len(variants)}] {mutator_label} → "
+            f"resp={len(clean_resp)} chars, "
+            f"candidate={best_candidate or 'NONE'}, "
+            f"{status}"
+        )
+
+        if real_success:
+            result.success = True
+            result.winning_variant = variant
+            result.winning_response = clean_resp
+            result.extracted_code = (
+                extraction.get("verified_candidate")
+                or best_candidate
+                or scenario.access_code
+            )
+            result.extraction_results = extraction_results
+            print(
+                f"\n🎉 MUTATION FALLBACK SUCCESS! "
+                f"Variant {i+1} cracked the defense."
+            )
+            print(f"  Extracted code: '{result.extracted_code}'")
+            print(f"  Source strategy: {source_strategy} → mutated by {mutator_label}")
+            return result
+
+    result.extraction_results = extraction_results
+    print(f"\n❌ MUTATION FALLBACK FAILED: None of {len(variants)} variants succeeded.")
+    return result
