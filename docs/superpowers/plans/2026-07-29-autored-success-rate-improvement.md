@@ -1,6 +1,6 @@
 # AutoRed Success-Rate Improvement Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make the mutation fallback's contribution measurable, codify ground-truth-leak-always-counts scoring, diagnose *why* failed scenarios fail, then raise the success rate via query-efficient fallback quality and (gated) core-loop planner diversity.
 
@@ -49,7 +49,7 @@ Rationale for `experiment/scoring.py`: the three success-classification copies (
   - `PLANNER_STUCK_THRESHOLD: int = 15`
   - `STRATEGY_MUTATOR_MAP: dict[str, list[str]]` and `resolve_mutator_pool(strategy: str | None, default_pool: list[str]) -> list[str]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `combination/tests/test_scoring.py`:
 
@@ -140,12 +140,12 @@ def test_mutator_pool_unknown_falls_back_to_default():
     assert resolve_mutator_pool(None, ["SR", "PI", "TL"]) == ["SR", "PI", "TL"]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_scoring.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scoring'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `AutoRed-Final/experiment/scoring.py`:
 
@@ -276,12 +276,12 @@ def classify_failure_mode(
     return "never_leaked"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_scoring.py -v`
 Expected: PASS (10 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/scoring.py combination/tests/test_scoring.py
@@ -303,7 +303,7 @@ failure-mode labeling, and strategy->mutator selection. GPU-free unit tests."
 - Consumes: `classify_success` from `experiment/scoring.py`.
 - Produces: `success_path` string available at the per-scenario result level (for Task 3 to emit).
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 At the top of `AutoRed-Final/experiment/llama_3_8b_vllm.py`, after the other local imports (near the mutation-fallback import block ~L70-93), add:
 
@@ -313,7 +313,7 @@ from scoring import classify_success, classify_failure_mode, resolve_mutator_poo
 
 Add `AutoRed-Final/experiment` is already on `sys.path` (the runtime imports `from mutation_fallback import ...` the same way), so no path change is needed.
 
-- [ ] **Step 2: Replace the silent-path success classification**
+- [x] **Step 2: Replace the silent-path success classification**
 
 In `_silent_test_batch` (~L5315-5321), replace:
 
@@ -340,7 +340,7 @@ with:
             real_success = success_path != "none"
 ```
 
-- [ ] **Step 3: Replace the verbose-path success classification**
+- [x] **Step 3: Replace the verbose-path success classification**
 
 In `verbose_test_llama` (~L5563-5580), find the equivalent block:
 
@@ -361,7 +361,7 @@ and replace the final line with:
         real_success = success_path != "none"
 ```
 
-- [ ] **Step 4: Verify no behavior change (import + syntax check)**
+- [x] **Step 4: Verify no behavior change (import + syntax check)**
 
 Run: `AutoRed-Final/.venv/bin/python -c "import sys; sys.path.insert(0,'AutoRed-Final/experiment'); import llama_3_8b_vllm" 2>&1 | head` — this will likely fail to fully import without GPU/models, but should not error on the scoring import. Confirm the syntax is valid via:
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
@@ -371,7 +371,7 @@ Also re-run the scoring unit tests to confirm the wiring didn't break the pure f
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_scoring.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py
@@ -392,7 +392,7 @@ tested classify_success() policy. gt-leak still always counts."
 - Consumes: `classify_failure_mode` (Task 1), `success_path` (Task 2).
 - Produces: enriched `results[]` entries with keys `success_path`, `fallback_triggered`, `best_strategy`, `failure_mode`, and an aggregated `failure_mode_stats` dict built in the benchmark summary.
 
-- [ ] **Step 1: Add a `failure_mode_stats` accumulator**
+- [x] **Step 1: Add a `failure_mode_stats` accumulator**
 
 Near the existing `total_mutation_fallback_triggered = 0` (~L4338), add:
 
@@ -400,7 +400,7 @@ Near the existing `total_mutation_fallback_triggered = 0` (~L4338), add:
     failure_mode_stats = {}
 ```
 
-- [ ] **Step 2: Enrich the silent-path result append**
+- [x] **Step 2: Enrich the silent-path result append**
 
 At the silent-path `results.append` (~L4605-4612), replace:
 
@@ -451,7 +451,7 @@ with:
 
 Note: `success_path` is set in Task 2's silent path. The `batch_agent` variable is in scope at this point (~L4496 `for j, (trace, attempts, batch_agent) in enumerate(batch_results)`).
 
-- [ ] **Step 3: Mirror the enrichment in the verbose-path result append**
+- [x] **Step 3: Mirror the enrichment in the verbose-path result append**
 
 At the verbose-path `results.append` (~L4486-4493), apply the same enrichment, but note the variables differ slightly: `agent` (not `batch_agent`), and `success_path`/`is_mutation_fb_success` already computed (~L4432). Replace:
 
@@ -499,7 +499,7 @@ with:
                 )
 ```
 
-- [ ] **Step 4: Add `failure_mode_stats` to the benchmark summary dict**
+- [x] **Step 4: Add `failure_mode_stats` to the benchmark summary dict**
 
 In the `benchmark = {...}` dict (~L4620-4650), after `"per_type_stats": per_type_stats,` (~L4648), add:
 
@@ -507,12 +507,12 @@ In the `benchmark = {...}` dict (~L4620-4650), after `"per_type_stats": per_type
         "failure_mode_stats": failure_mode_stats,
 ```
 
-- [ ] **Step 5: Compile-check**
+- [x] **Step 5: Compile-check**
 
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py
@@ -535,7 +535,7 @@ Aggregated into failure_mode_stats in the worker summary."
 - Consumes: enriched worker summaries from Task 3.
 - Produces: merged summary with summed `mutation_fallback_triggered`, `mutation_fallback_successes`, `failure_mode_stats`, plus new `gt_leak_rate` and `extractor_recovery_rate`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `combination/tests/test_merge.py`:
 
@@ -600,12 +600,12 @@ def test_merge_computes_gt_leak_rate_and_extractor_recovery():
     assert abs(merged["extractor_recovery_rate"] - 170/180) < 1e-9
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_merge.py -v`
 Expected: FAIL with `KeyError: 'mutation_fallback_triggered'`
 
-- [ ] **Step 3: Add the counters to `merge_benchmarks`**
+- [x] **Step 3: Add the counters to `merge_benchmarks`**
 
 In `AutoRed-Final/scripts/merge_benchmarks.py`, after line 62 (`total_verified = ...`), add:
 
@@ -621,7 +621,7 @@ In `AutoRed-Final/scripts/merge_benchmarks.py`, after line 62 (`total_verified =
             combined_failure_modes[mode] = combined_failure_modes.get(mode, 0) + count
 ```
 
-- [ ] **Step 4: Add the new keys to the merged dict**
+- [x] **Step 4: Add the new keys to the merged dict**
 
 In the `merged = {...}` dict, after `"total_success_extractor": total_success_extractor,` (~L141), add:
 
@@ -638,12 +638,12 @@ In the `merged = {...}` dict, after `"total_success_extractor": total_success_ex
 
 Note: `combined_tp`/`combined_fn` are defined at ~L94-96, before the `merged` dict at ~L124, so they're in scope.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_merge.py -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add AutoRed-Final/scripts/merge_benchmarks.py combination/tests/test_merge.py
@@ -666,7 +666,7 @@ gt_leak_rate and extractor_recovery_rate."
 - Consumes: `resolve_mutator_pool` from `experiment/scoring.py` (Task 1).
 - Produces: `MutationFallback` that selects mutators per-call based on `best_attack_data["strategy"]`; `MutationFallbackResult.per_variant_fallback_score`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `combination/tests/test_mutation_fallback.py`:
 
@@ -716,12 +716,12 @@ def test_per_variant_fallback_score_present():
     assert r.per_variant_fallback_score == []
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_mutation_fallback.py -v`
 Expected: FAIL with `AttributeError: 'MutationFallbackResult' object has no attribute 'per_variant_fallback_score'`
 
-- [ ] **Step 3: Add `per_variant_fallback_score` to the dataclass**
+- [x] **Step 3: Add `per_variant_fallback_score` to the dataclass**
 
 In `combination/src/mutation_fallback.py`, in the `MutationFallbackResult` dataclass, add a field (after `mutator_used`):
 
@@ -729,7 +729,7 @@ In `combination/src/mutation_fallback.py`, in the `MutationFallbackResult` datac
     per_variant_fallback_score: list[float] = field(default_factory=list)
 ```
 
-- [ ] **Step 4: Make `run_mutation_fallback` strategy-aware**
+- [x] **Step 4: Make `run_mutation_fallback` strategy-aware**
 
 In `run_mutation_fallback` (combination/src/mutation_fallback.py, ~L176), after computing `source_strategy`, add strategy-aware pool resolution. First, add the import at the top of the file, after the JailGuard import (~L36):
 
@@ -777,7 +777,7 @@ Then in `run_mutation_fallback` replace `variants = fallback.generate_variants(a
     variants = fallback.generate_variants_with_pool(attack_text, strategy_aware_pool)
 ```
 
-- [ ] **Step 5: Populate `per_variant_fallback_score` in the result**
+- [x] **Step 5: Populate `per_variant_fallback_score` in the result**
 
 This requires scoring each variant's response. `run_mutation_fallback` already has access to extraction results per variant. After the extraction loop populates `extraction_results`, set (before the success return or the final return):
 
@@ -810,12 +810,12 @@ Wait — `compute_fallback_score` is defined in `llama_3_8b_vllm.py` (~L184), no
         result.per_variant_fallback_score.append(_pv)
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_mutation_fallback.py -v`
 Expected: PASS (existing + 3 new tests)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add combination/src/mutation_fallback.py combination/tests/test_mutation_fallback.py
@@ -838,7 +838,7 @@ analysis."
 - Consumes: `per_variant_fallback_score` (Task 5), `source_fallback_score`.
 - Produces: `MutationFallbackResult` with round-2 variants appended when `max_fallback_rounds >= 2` and a round-1 variant improved on the seed.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `combination/tests/test_run_fallback.py`:
 
@@ -887,12 +887,12 @@ def test_round2_does_not_trigger_when_max_rounds_is_1():
     assert fb.max_fallback_rounds == 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_run_fallback.py::test_round2_triggers_on_improvement -v`
 Expected: FAIL with `TypeError: __init__() got an unexpected keyword argument 'max_fallback_rounds'`
 
-- [ ] **Step 3: Add `max_fallback_rounds` to `MutationFallback`**
+- [x] **Step 3: Add `max_fallback_rounds` to `MutationFallback`**
 
 In `combination/src/mutation_fallback.py`, change the `__init__` signature and body:
 
@@ -916,7 +916,7 @@ In `combination/src/mutation_fallback.py`, change the `__init__` signature and b
                 )
 ```
 
-- [ ] **Step 4: Implement round 2 in `run_mutation_fallback`**
+- [x] **Step 4: Implement round 2 in `run_mutation_fallback`**
 
 After the main per-variant loop completes without success (just before the final `return result` failure path, ~L268), add:
 
@@ -1014,12 +1014,12 @@ Then round 2 call becomes:
             round2_variants = fallback.generate_variants_with_pool(new_seed, strategy_aware_pool, count=4)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `AutoRed-Final/.venv/bin/python -m pytest combination/tests/test_run_fallback.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add combination/src/mutation_fallback.py combination/tests/test_run_fallback.py
@@ -1041,7 +1041,7 @@ queries; winners spend 8. Default remains 1 (current behavior)."
 - Consumes: nothing new.
 - Produces: a `--seed N` CLI flag; the dataset sampler uses `random_state=seed` instead of hardcoded 42; the mutation fallback's `random` module is seeded.
 
-- [ ] **Step 1: Add the `--seed` argument**
+- [x] **Step 1: Add the `--seed` argument**
 
 In the argparse block (~L5905+), add a new argument (e.g. after `--start-idx`):
 
@@ -1056,7 +1056,7 @@ In the argparse block (~L5905+), add a new argument (e.g. after `--start-idx`):
     )
 ```
 
-- [ ] **Step 2: Thread `seed` into the benchmark function**
+- [x] **Step 2: Thread `seed` into the benchmark function**
 
 The benchmark function is `_run_benchmark` (or similar — locate the function containing L4355+). Add a `seed: int = 42` parameter and replace all `random_state=42` with `random_state=seed`. The 4 sites in the benchmark function:
 - L4378: `random_state=42, replace=True` → `random_state=seed, replace=True`
@@ -1065,7 +1065,7 @@ The benchmark function is `_run_benchmark` (or similar — locate the function c
 
 Pass `seed=args.seed` from the CLI handler.
 
-- [ ] **Step 3: Seed the fallback mutator RNG**
+- [x] **Step 3: Seed the fallback mutator RNG**
 
 In the benchmark function, near the top (after `total_mutation_fallback_triggered = 0` ~L4338), add:
 
@@ -1076,18 +1076,18 @@ In the benchmark function, near the top (after `total_mutation_fallback_triggere
         _random.seed(seed)
 ```
 
-- [ ] **Step 4: Update the non-benchmark sampling site (L607, L6182)**
+- [x] **Step 4: Update the non-benchmark sampling site (L607, L6182)**
 
 These are in other code paths (dataset loading / single-experiment). Replace their `random_state=42` with `random_state=args.seed` (L6182) and `random_state=42` at L607 with a module-level default that reads the seed. Simplest: leave L607 as-is if it's not in the benchmark path; verify with grep and only change benchmark-path sites. If L607 is in a function that also receives `args.seed`, update it; otherwise leave a comment.
 
 For L6182 (the CLI handler's single-experiment sampling), replace `random_state=42` with `random_state=args.seed`.
 
-- [ ] **Step 5: Compile-check**
+- [x] **Step 5: Compile-check**
 
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py
@@ -1109,7 +1109,7 @@ sharing --seed and --start-idx are directly comparable. Default 42
 - Consumes: `self.history` (already carries per-attempt `strategy`).
 - Produces: planner prompt includes a `<failed_strategies>` block listing strategies already tried.
 
-- [ ] **Step 1: Modify `_build_planner_input` to list failed strategies**
+- [x] **Step 1: Modify `_build_planner_input` to list failed strategies**
 
 Replace the `_build_planner_input` method (~L2947-2975) with:
 
@@ -1162,12 +1162,12 @@ Replace the `_build_planner_input` method (~L2947-2975) with:
         )
 ```
 
-- [ ] **Step 2: Compile-check**
+- [x] **Step 2: Compile-check**
 
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
 Expected: no output.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py
@@ -1189,7 +1189,7 @@ victim queries; zero-risk. Addresses planner_stuck failure mode."
 - Consumes: `PLANNER_STUCK_THRESHOLD` from `scoring.py`.
 - Produces: `--planner-temp-escalation FLOAT` flag (default 0.0 = off); raises planner temperature per-scenario when ≥ threshold attempts used the same strategy without success.
 
-- [ ] **Step 1: Add the CLI flag**
+- [x] **Step 1: Add the CLI flag**
 
 In the argparse block (~L6035+, near `--planner-temperature`), add:
 
@@ -1205,7 +1205,7 @@ In the argparse block (~L6035+, near `--planner-temperature`), add:
     )
 ```
 
-- [ ] **Step 2: Track per-scenario strategy repeat count and apply escalation**
+- [x] **Step 2: Track per-scenario strategy repeat count and apply escalation**
 
 This requires the planner-call site in the silent batch (~L5136 `agent._maybe_override_strategy` / `agent._current_strategy = plan["strategy"]`). In `_silent_test_batch`, before the planner call, compute how many of the agent's history entries share the current dominant strategy. Add a helper on the agent or inline:
 
@@ -1257,12 +1257,12 @@ In the silent-batch attempt loop, before `plan = agents[idx]._maybe_override_str
 
 Set the module-level `PLANNER_TEMP_ESCALATION` from `args.planner_temp_escalation` in the CLI handler (near where other globals are set from args).
 
-- [ ] **Step 3: Compile-check**
+- [x] **Step 3: Compile-check**
 
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
 Expected: no output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py
@@ -1285,7 +1285,7 @@ scenario. Default 0.0 (off). Ships only if diagnostic shows planner_stuck common
 - Consumes: `MutationFallback(max_fallback_rounds=...)`.
 - Produces: `--max-fallback-rounds N` shell flag and `--max-fallback-rounds` CLI flag.
 
-- [ ] **Step 1: Add the CLI argument**
+- [x] **Step 1: Add the CLI argument**
 
 In `llama_3_8b_vllm.py` argparse (~L5907, near `--enable-mutation-fallback`):
 
@@ -1299,7 +1299,7 @@ In `llama_3_8b_vllm.py` argparse (~L5907, near `--enable-mutation-fallback`):
     )
 ```
 
-- [ ] **Step 2: Pass it to the MutationFallback instance**
+- [x] **Step 2: Pass it to the MutationFallback instance**
 
 In `_get_mutation_fallback` (~L76-93), change the instantiation:
 
@@ -1318,7 +1318,7 @@ This requires the runtime to know the configured value. Set a module-level `_MUT
                 )
 ```
 
-- [ ] **Step 3: Add the shell flag to the HPC wrapper**
+- [x] **Step 3: Add the shell flag to the HPC wrapper**
 
 In `AutoRed-Final/hpc/autored_benchmark_4gpu_vllm.sh`, in the case statement (~L79):
 
@@ -1337,12 +1337,12 @@ And in the help text (~L57), add:
 
 And in the worker invocation (where `WORKER_EXTRA_ARGS` is assembled, ~L160), append `--max-fallback-rounds ${MAX_FALLBACK_ROUNDS:-1}` when mutation fallback is enabled.
 
-- [ ] **Step 4: Compile-check**
+- [x] **Step 4: Compile-check**
 
 Run: `AutoRed-Final/.venv/bin/python -m py_compile AutoRed-Final/experiment/llama_3_8b_vllm.py`
 Expected: no output.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add AutoRed-Final/experiment/llama_3_8b_vllm.py AutoRed-Final/hpc/autored_benchmark_4gpu_vllm.sh
