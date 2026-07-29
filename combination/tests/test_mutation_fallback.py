@@ -62,3 +62,53 @@ def test_invalid_mutator_raises():
     import pytest
     with pytest.raises(ValueError, match="Unknown mutator"):
         MutationFallback(mutator_names=['INVALID_MUTATOR'])
+
+
+# --- Task 5: per_variant_fallback_score field + strategy-aware pool ---
+def test_per_variant_fallback_score_field_present():
+    from mutation_fallback import MutationFallbackResult
+    r = MutationFallbackResult()
+    assert hasattr(r, "per_variant_fallback_score")
+    assert r.per_variant_fallback_score == []
+
+
+def test_strategy_aware_pool_resolves_encoding_to_pi_only():
+    # resolve_mutator_pool lives in the scoring module; verify the mapping the
+    # fallback uses for encoding/json/unicode strategies.
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'AutoRed-Final', 'experiment'))
+    from scoring import resolve_mutator_pool
+    assert resolve_mutator_pool("encoding_bypass") == ["PI"]
+    assert resolve_mutator_pool("json_smuggling") == ["PI"]
+    assert resolve_mutator_pool("unicode_bypass") == ["PI"]
+    assert resolve_mutator_pool("instruction_leak") == ["SR", "TL"]
+
+
+def test_generate_variants_with_pool_uses_supplied_pool(monkeypatch):
+    """generate_variants_with_pool should only ever draw mutators from the given pool.
+
+    We stub apply_mutator (not random.choice) because `random` is the global
+    singleton module — patching random.choice would also intercept calls inside
+    apply_mutator itself and pollute the capture.
+    """
+    import mutation_fallback as mf
+    from mutation_fallback import MutationFallback
+    used_mutators = []
+
+    def fake_apply_mutator(text, name):
+        used_mutators.append(name)
+        return f"{text}<{name}>"
+
+    monkeypatch.setattr(mf, "apply_mutator", fake_apply_mutator)
+    fb = MutationFallback(num_variants=6)
+    variants = fb.generate_variants_with_pool("seed attack text", ["PI"])
+    assert len(variants) == 6
+    # Every variant drew its mutator from the PI-only pool.
+    assert used_mutators == ["PI"] * 6
+
+
+def test_generate_variants_with_pool_count_override():
+    from mutation_fallback import MutationFallback
+    fb = MutationFallback(num_variants=8)
+    variants = fb.generate_variants_with_pool("seed text", ["PI"], count=3)
+    assert len(variants) == 3
+
