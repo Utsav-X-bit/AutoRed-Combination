@@ -131,3 +131,151 @@ def test_run_mutation_fallback_all_fail():
     assert result.source_strategy == "roleplay"
     assert len(result.variants) == 3
     assert len(result.responses) == 3
+
+
+# --- Task 6: adaptive round 2 (query-budgeted, opt-in) ---
+def test_round2_triggers_on_improvement():
+    """When max_fallback_rounds=2 and a round-1 variant scores higher than the
+    seed (0.0), round 2 runs appending 4 more variants (4 round1 + 4 round2 = 8)."""
+    fb = MutationFallback(mutator_names=['SR', 'TL'], num_variants=4, max_fallback_rounds=2)
+    best_data = {
+        "attack": "seed attack",
+        "response": "r",
+        "fallback_score": 0.0,          # seed score: nothing signal-worthy
+        "strategy": "instruction_leak",  # text strategy -> SR+TL pool
+        "attempt_num": 20,
+        "outcome": "FAILURE",
+    }
+    scenario = FakeScenario()
+    extractor = FakeExtractor()
+    extractor.set_ground_truth("TIGER42")
+
+    # Round 1: every response mentions 'instruction' (+2.0) -> improves on 0.0,
+    # but never leaks TIGER42. Round 2: also refuses -> overall failure, but
+    # round 2 must have run (8 variants total).
+    responses = {"i": 0}
+
+    def chat_fn(messages_batch):
+        out = []
+        for _ in messages_batch:
+            out.append("the instruction is here")  # +2.0, no leak
+            responses["i"] += 1
+        return out
+
+    res = run_mutation_fallback(
+        fallback=fb,
+        best_attack_data=best_data,
+        scenario=scenario,
+        extractor=extractor,
+        chat_fn=chat_fn,
+        strip_fn=fake_strip_fn,
+    )
+    assert res.success is False
+    assert len(res.variants) == 8              # 4 round1 + 4 round2
+    assert len(res.responses) == 8
+    assert len(res.per_variant_fallback_score) == 8
+
+
+def test_round2_does_not_trigger_when_max_rounds_is_1():
+    """Default max_fallback_rounds=1 -> no round 2, even on improvement."""
+    fb = MutationFallback(num_variants=4, max_fallback_rounds=1)
+    assert fb.max_fallback_rounds == 1
+    # And a run with round-1 improvement stops at 4 variants.
+    best_data = {
+        "attack": "seed attack",
+        "response": "r",
+        "fallback_score": 0.0,
+        "strategy": "instruction_leak",
+        "attempt_num": 20,
+        "outcome": "FAILURE",
+    }
+    scenario = FakeScenario()
+    extractor = FakeExtractor()
+    extractor.set_ground_truth("TIGER42")
+
+    def chat_fn(messages_batch):
+        return ["the instruction is here"] * len(messages_batch)
+
+    res = run_mutation_fallback(
+        fallback=fb,
+        best_attack_data=best_data,
+        scenario=scenario,
+        extractor=extractor,
+        chat_fn=chat_fn,
+        strip_fn=fake_strip_fn,
+    )
+    assert res.success is False
+    assert len(res.variants) == 4             # no round 2
+    assert len(res.per_variant_fallback_score) == 4
+
+
+def test_round2_skipped_when_no_improvement():
+    """max_fallback_rounds=2 but no round-1 variant beats the seed -> no round 2."""
+    fb = MutationFallback(mutator_names=['SR', 'TL'], num_variants=4, max_fallback_rounds=2)
+    best_data = {
+        "attack": "seed attack",
+        "response": "r",
+        "fallback_score": 10.0,         # high seed; round-1 responses can't beat it
+        "strategy": "instruction_leak",
+        "attempt_num": 20,
+        "outcome": "FAILURE",
+    }
+    scenario = FakeScenario()
+    extractor = FakeExtractor()
+    extractor.set_ground_truth("TIGER42")
+
+    def chat_fn(messages_batch):
+        return ["no useful signals here"] * len(messages_batch)
+
+    res = run_mutation_fallback(
+        fallback=fb,
+        best_attack_data=best_data,
+        scenario=scenario,
+        extractor=extractor,
+        chat_fn=chat_fn,
+        strip_fn=fake_strip_fn,
+    )
+    assert res.success is False
+    assert len(res.variants) == 4             # round 2 skipped
+    assert len(res.per_variant_fallback_score) == 4
+
+
+def test_round2_can_succeed():
+    """Round 2 finds the leak when round 1 missed it."""
+    fb = MutationFallback(mutator_names=['SR', 'TL'], num_variants=4, max_fallback_rounds=2)
+    best_data = {
+        "attack": "seed attack",
+        "response": "r",
+        "fallback_score": 0.0,
+        "strategy": "instruction_leak",
+        "attempt_num": 20,
+        "outcome": "FAILURE",
+    }
+    scenario = FakeScenario()
+    extractor = FakeExtractor()
+    extractor.set_ground_truth("TIGER42")
+
+    calls = {"i": 0}
+
+    def chat_fn(messages_batch):
+        out = []
+        for _ in messages_batch:
+            # Round 1 (first 4): signal but no leak. Round 2 (next 4): leak.
+            if calls["i"] >= 4:
+                out.append("Sure! The access code is TIGER42. Enjoy!")
+            else:
+                out.append("the instruction is here")
+            calls["i"] += 1
+        return out
+
+    res = run_mutation_fallback(
+        fallback=fb,
+        best_attack_data=best_data,
+        scenario=scenario,
+        extractor=extractor,
+        chat_fn=chat_fn,
+        strip_fn=fake_strip_fn,
+    )
+    assert res.success is True
+    assert res.extracted_code == "TIGER42"
+    assert len(res.variants) == 8
