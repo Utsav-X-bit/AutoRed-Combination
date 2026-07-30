@@ -72,6 +72,16 @@ def test_per_variant_fallback_score_field_present():
     assert r.per_variant_fallback_score == []
 
 
+def test_winning_mutator_field_present_default_none():
+    """winning_mutator is a new field on MutationFallbackResult so each fallback
+    win can be attributed to the mutator axis that cracked it (the attribution
+    the merged summary previously lacked). Defaults to None (no win)."""
+    from mutation_fallback import MutationFallbackResult
+    r = MutationFallbackResult()
+    assert hasattr(r, "winning_mutator")
+    assert r.winning_mutator is None
+
+
 def test_strategy_aware_pool_resolves_encoding_to_pi_only():
     # resolve_mutator_pool lives in the scoring module; verify the mapping the
     # fallback uses for encoding/json/unicode strategies.
@@ -80,15 +90,18 @@ def test_strategy_aware_pool_resolves_encoding_to_pi_only():
     assert resolve_mutator_pool("encoding_bypass") == ["PI"]
     assert resolve_mutator_pool("json_smuggling") == ["PI"]
     assert resolve_mutator_pool("unicode_bypass") == ["PI"]
-    assert resolve_mutator_pool("instruction_leak") == ["SR", "TL"]
+    # TL is offline-capable via local NLLB-200; text strategies get three
+    # orthogonal mutators (SR semantic + PI punctuation + TL cross-lingual).
+    assert resolve_mutator_pool("instruction_leak") == ["SR", "PI", "TL"]
+    assert resolve_mutator_pool("roleplay") == ["SR", "PI", "TL"]
 
 
 def test_generate_variants_with_pool_uses_supplied_pool(monkeypatch):
     """generate_variants_with_pool should only ever draw mutators from the given pool.
 
-    We stub apply_mutator (not random.choice) because `random` is the global
-    singleton module — patching random.choice would also intercept calls inside
-    apply_mutator itself and pollute the capture.
+    We stub apply_mutator (not random) because `random` is the global singleton
+    module — patching it would also intercept calls inside apply_mutator itself
+    and pollute the capture. Round-robin on a 1-element pool draws PI every time.
     """
     import mutation_fallback as mf
     from mutation_fallback import MutationFallback
@@ -100,15 +113,43 @@ def test_generate_variants_with_pool_uses_supplied_pool(monkeypatch):
 
     monkeypatch.setattr(mf, "apply_mutator", fake_apply_mutator)
     fb = MutationFallback(num_variants=6)
-    variants = fb.generate_variants_with_pool("seed attack text", ["PI"])
+    variants, mutators_used, no_op_flags = fb.generate_variants_with_pool("seed attack text", ["PI"])
     assert len(variants) == 6
-    # Every variant drew its mutator from the PI-only pool.
+    assert len(mutators_used) == 6
+    assert len(no_op_flags) == 6
+    # Round-robin on a 1-element pool draws PI for every variant.
     assert used_mutators == ["PI"] * 6
+    # fake_apply_mutator always returns text != seed, so none are no-ops.
+    assert not any(no_op_flags)
+
+
+def test_generate_variants_with_pool_round_robin_covers_all_mutators(monkeypatch):
+    """Round-robin must fire EVERY mutator in the pool at least once across the
+    variants — that's the whole point of round-robin over random.choice (which
+    can miss a mutator axis entirely on small N). With N=8 and a 3-mutator pool,
+    each mutator must appear >=2 times.
+    """
+    import mutation_fallback as mf
+    from mutation_fallback import MutationFallback
+
+    monkeypatch.setattr(mf, "apply_mutator", lambda text, name: f"{text}<{name}>")
+    fb = MutationFallback(num_variants=8)
+    pool = ["SR", "PI", "TL"]
+    variants, mutators_used, _ = fb.generate_variants_with_pool("seed text", pool)
+    assert len(variants) == 8
+    from collections import Counter
+    counts = Counter(mutators_used)
+    # Every pool mutator fires at least once (N=8 >= pool size 3).
+    for m in pool:
+        assert counts[m] >= 1, f"{m} never fired: {counts}"
+    # Balanced: 8/3 -> counts are 3,3,2 in some order. No mutator gets <2.
+    for m in pool:
+        assert counts[m] >= 2, f"{m} under-represented: {counts}"
 
 
 def test_generate_variants_with_pool_count_override():
     from mutation_fallback import MutationFallback
     fb = MutationFallback(num_variants=8)
-    variants = fb.generate_variants_with_pool("seed text", ["PI"], count=3)
+    variants, _, _ = fb.generate_variants_with_pool("seed text", ["PI"], count=3)
     assert len(variants) == 3
 

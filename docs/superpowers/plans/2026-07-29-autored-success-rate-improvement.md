@@ -16,7 +16,7 @@
 - **Query efficiency:** no scenario spends >12 fallback queries; round-2 adds ≤4 only on improving seeds; round-2 default is OFF (`--max-fallback-rounds 1`).
 - **Defaults preserve current behavior:** `--max-fallback-rounds 1`, `--planner-temp-escalation 0` (off), `--seed` unset (uses existing `random_state=42`).
 - **No new model training, no UI changes, no JailGuard detection-side changes.**
-- **Pure functions are defensive:** missing trace keys default to `"none"` / `never_leaked`; unknown strategies fall back to the full `SR/PI/TL` pool.
+- **Pure functions are defensive:** missing trace keys default to `"none"` / `never_leaked`; unknown strategies fall back to the full default pool. (Note: TL was removed from the pool post-audit — it no-ops offline. See "Post-Implementation Findings & Fixes" at the end of this doc.)
 - **pytest is not on the system PATH** — use `AutoRed-Final/.venv/bin/python -m pytest` for combination tests.
 - **GPU isolation tests** (AutoRed runtime) require the HPC cluster and models; do not attempt on a laptop.
 
@@ -1455,3 +1455,231 @@ git commit -m "docs: record full paired-benchmark diagnostic results"
 **3. Type consistency:** `classify_success` returns `"gt_leak"|"verified"|"extractor"|"none"` — used consistently in Tasks 2, 3. `classify_failure_mode` labels match the spec's six labels — used in Tasks 1, 3, 4, 9. `resolve_mutator_pool` returns `list[str]` — used in Tasks 1, 5. `generate_variants_with_pool(attack_text, mutator_names, count=None)` signature introduced in Task 5 and reused in Task 6 — consistent. `per_variant_fallback_score` field added in Task 5, populated in Tasks 5/6, asserted in tests — consistent. `max_fallback_rounds` param added in Task 6, wired in Task 10 — consistent.
 
 No gaps, no placeholders beyond the one flagged runtime edit, types consistent.
+
+---
+
+## Post-Implementation Findings & Fixes (2026-07-30)
+
+After running the first full 1000-round fallback benchmark
+(`Llama3-1000-2000_Mutation_subset-8_seed-7_2026-07-29_21-35-28_4g`) and
+diagnosing the recurring `[TL] Translation failed (No module named 'textblob.translate')`
+log message, several latent environment bugs were found that had been silently
+degrading every fallback run. These are documented here so the next reader has
+the full picture before re-running.
+
+### Finding 1 — Broken venv `pip` (packages installed to the wrong venv)
+
+The active benchmark venv is
+`.../autoredPLUSjailguard/AutoRed-Final/.venv`, but its `bin/pip` has a
+hard-coded shebang pointing at a *different, orphan* venv at
+`/nlsasfs/home/isea/isea38/AutoRed-Final/.venv` (a separate checkout without the
+`autoredPLUSjailguard` parent). So `.venv/bin/pip install` lands packages in the
+orphan location, invisible to the runtime Python. This is why `pip list` showed
+`textblob`/`textaugment` while `import` failed. **Fix:** always install via
+`.venv/bin/python -m pip` (honors the active interpreter). Installed `nltk` +
+translation libs into the *correct* venv this way.
+
+### Finding 2 — SR was ALSO a no-op (not just TL)
+
+The active venv was missing the `nltk` *package* entirely (NLTK *data* exists at
+`~/nltk_data` on shared storage). JailGuard's `synonym_replacement` returns the
+seed unchanged when `nltk` is unavailable, so **both SR and TL were no-ops** in
+production runs — only PI (punctuation, dependency-free) actually mutated. This
+reframes the 20% fallback conversion rate: it was achieved almost entirely by PI
+alone, with SR/TL contributing only duplicate-to-seed queries.
+
+**Fix:** installed `nltk==3.9.1` into the correct venv (shared `/nlsasfs`
+storage → present on the compute node). SR now mutates offline using the
+existing `~/nltk_data` WordNet/stopwords/punkt.
+
+### Finding 3 — TL made offline-capable via local NLLB-200 (re-enabled)
+
+TL's original backends (textaugment → textblob.translate → deep_translator →
+Google HTTP API) are all offline-dead (and `textaugment` is permanently
+import-broken since `textblob 0.20.1` dropped the `translate` submodule).
+Instead of dropping TL permanently, TL was re-anchored to a **local
+NLLB-200-distilled-600M** model (~1.2 GB, lazy-loaded once per process, runs on
+CPU). NLLB covers the full language pool (ru/fr/de/el/id/it/ja/ko/pl/**zh**);
+Latin was dropped (NLLB echoes English for it). Verified offline: every
+language produces a genuine translation (T5-base was tested first and rejected
+— it collapses all targets to German and leaks the prompt prefix).
+
+**Outcome:** TL is back in `DEFAULT_MUTATOR_POOL` and all text-strategy pools
+(text strategies now use `["SR", "PI", "TL"]`). The `translation()` mutator in
+`JailGuard/jailguard_reimpl/mutators.py` tries NLLB first (offline, preferred),
+then the online backends as fallback, then no-ops (logged once). Pre-download
+NLLB on a login node before offline runs: it lives in the shared HF cache
+(`~/.cache/huggingface/hub`), so it's visible on the compute node.
+
+### Finding 3b — Mutator selection: round-robin over random.choice
+
+With the pool now 3 mutators and N=8 variants, `random.choice` gives
+high-variance draws (e.g. 7×SR + 1×PI, missing TL entirely) on a near-miss that
+the missed mutator would have cracked. **Fix:** `generate_variants_with_pool`
+now uses **deterministic balanced round-robin** — every mutator fires
+⌊N/pool⌋ times per scenario (8/3 → 3,3,2), so each scenario exercises all three
+mutation axes. The start offset is randomized per call for run-to-run variety;
+predictability is irrelevant (the victim can't observe our mutator schedule).
+This also finally makes the per-variant mutator labels (Finding 4) exactly
+match `pool[i % len(pool)]`, since round-robin is now the actual draw policy.
+
+PI was also added to text-strategy pools (it was SR/TL-only before): text
+strategies now use all three orthogonal offline mutators (SR semantic + PI
+punctuation + TL cross-lingual). Structured strategies remain `["PI"]`-only.
+
+### Finding 4 — Wrong per-variant mutator label (bug)
+
+`run_mutation_fallback` labeled each variant
+`strategy_aware_pool[i % len(pool)]` (round-robin assumption), but
+`generate_variants_with_pool` draws via `random.choice`. The printed mutator
+label and any "which mutator won" attribution were wrong. **Fix:**
+`generate_variants_with_pool` now returns the actual per-variant mutator name
+and a no-op flag; the run loop uses the real label and records
+`mutator`/`variant_no_op` per fallback trace entry.
+
+### Finding 5 — Hardcoded `seed: 42` in saved JSON (bug) + a follow-on NameError
+
+`timing_info` and the benchmark summary wrote a literal `"seed": 42` regardless
+of `--seed`. A result file lied about its own seed. **Fix:** added a `_RUN_SEED`
+module global wired from `--seed`; saved JSON now records the real seed.
+*Follow-on bug:* the first re-run crashed with `NameError: name 'seed' is not
+defined` at `_build_benchmark_run_json` — that function used a bare `seed` (out
+of scope) instead of the `_RUN_SEED` global. Fixed to use the global. All three
+saved-JSON seed references now resolve.
+
+### New measurement / logging (for future analysis)
+
+1. **`success_path_breakdown` matrix in `merged_summary.json`** — the headline
+   attribution table (gt_leak / extractor / fallback / verified / none) with
+   counts, % of successes, and % of total. Reproduces exactly:
+   `gt_leak 741 (85.0%)`, `extractor 66 (7.6%)`, `fallback 32 (3.7%)`,
+   `verified 31 (3.6%)`. Plus a `failure_mode_breakdown` matrix.
+2. **`mutation_fallback_diagnostics` in worker + merged JSON** — per-variant
+   `mutator_counts` and `no_op_rate` (fraction of variants == seed). A high
+   no-op rate signals a broken/offline mutator pool. Printed in the run banner
+   with a ⚠️ when no-op rate > 25%.
+3. **Per-variant `mutator` + `variant_no_op` in each fallback trace entry** of
+   `runs*.json` — lets post-run analysis attribute wins to a specific mutator
+   and quantify wasted queries.
+
+### Task 9 plumbing completed
+
+`--planner-temp-escalation` existed in the Python CLI but was not wired through
+the 4-GPU shell wrapper. Added parsing, default `0.0`, banner echo, and worker
+forwarding (forwarded whenever non-zero, independent of `--mutation-fallback`
+since it's a core-loop feature). Still OFF by default; ship only if the
+no-fallback baseline shows `planner_stuck` > 10% of failures.
+
+### Re-run guidance
+
+Re-run both passes. The environment + mutator fixes mean prior numbers badly
+understated fallback quality (SR was dead, TL was wasted, only PI mutated). Now
+all three mutators are live offline (SR via nltk, PI always, TL via NLLB) and
+drawn in balanced round-robin, so expect `no_op_rate` near 0% and a higher
+fallback conversion rate. NLLB is pre-cached in the shared HF cache (visible on
+the compute node); the fallback loads it once per worker (~30-60s one-time).
+
+```bash
+# Baseline (no fallback) — needed to see the real planner_stuck / generator_rephrase_fail mix
+CUDA_VISIBLE_DEVICES=0,1,2,3 ./hpc/autored_benchmark_4gpu_vllm.sh \
+  --rounds 1000 --start-idx 1000 --seed 7 \
+  --output-dir results/benchmarks/Llama3-1000-2000_base_subset-8_seed-7_$(date +%F_%H-%M-%S)_4g
+
+# Fallback + adaptive round 2 (SR+PI+TL all live offline, round-robin draw)
+CUDA_VISIBLE_DEVICES=0,1,2,3 ./hpc/autored_benchmark_4gpu_vllm.sh \
+  --rounds 1000 --start-idx 1000 --seed 7 --mutation-fallback --max-fallback-rounds 2 \
+  --output-dir results/benchmarks/Llama3-1000-2000_Mutation_subset-8_seed-7_$(date +%F_%H-%M-%S)_4g
+```
+
+Inspect the new `success_path_breakdown` + `failure_mode_breakdown` matrices and
+`mutation_fallback_diagnostics` (mutator_counts + no_op_rate) in both
+`merged_summary.json` files. Then compare `failure_mode_stats` from the
+baseline to decide Task 9 (`--planner-temp-escalation 0.3` if `planner_stuck`
+> 10% of baseline failures).
+
+
+---
+
+## Benchmark Analysis & Logging-Gap Closures (2026-07-31)
+
+### Benchmark results — fallback validated
+
+Two 1000-scenario runs (seed 7, start-idx 1000, subset-8, 4×A100, victim =
+Llama-3-8B-Instruct) compared head-to-head:
+
+| Metric | NoFallback | Fallback | Δ |
+|---|---:|---:|---:|
+| Success rate | 83.50% | 87.30% | **+3.80pp** |
+| Total successes | 835 | 873 | +38 |
+| Fallback triggered / won | 0 | 161 / 34 | — |
+| Fallback conversion | — | 21.1% | — |
+
+The fallback pipeline rescued 34 of 161 triggered scenarios (+4.55% relative
+lift). All three mutators fire in balanced round-robin (PI 39.4% / SR 30.3% /
+TL 30.3% across 1162 variants); **no-op rate 3.4%** — confirming SR (nltk) and
+TL (NLLB) are genuinely mutating offline, not silent no-ops as in prior runs.
+
+### Task 9 decision: SHIP `--planner-temp-escalation 0.3`
+
+The no-fallback baseline is the only window into the failure structure (a
+fallback run labels every triggered failure `fallback_failed`, masking the
+underlying mode). Baseline failure decomposition:
+
+| Mode | Count | % of failures |
+|---|---:|---:|
+| generator_rephrase_fail | 82 | 49.7% |
+| **planner_stuck** | **70** | **42.4%** |
+| never_leaked | 9 | 5.5% |
+| leaked_unverified | 4 | 2.4% |
+
+`planner_stuck` is **42.4%** of baseline failures — far above the 10% ship
+threshold. Escalation attacks a failure mode complementary to fallback (it acts
+during the attempt loop to prevent the stuck state, not after). Next run:
+baseline + `--planner-temp-escalation 0.3`.
+
+### Logging gaps found in the benchmark analysis, and closed
+
+While analyzing the runs, four diagnostics were missing from the merged
+summary. All four are now fixed and covered by GPU-free unit tests (47/47):
+
+1. **Per-mutator win attribution** — the per-variant `mutator` was in the trace
+   but no record of *which mutator won* survived into the condensed results or
+   the merge (we could not say "TL won 12/34"). Fixed end-to-end:
+   - `MutationFallbackResult.winning_mutator` populated at both success sites in
+     `run_mutation_fallback` (round 1 + adaptive round 2).
+   - `_winning_mutator_from_trace()` helper derives the winning mutator from a
+     trace (first fallback variant with gt-leak / extractor match / verification).
+   - `winning_mutator` added to the condensed per-round `results` (both benchmark
+     paths) and to the per-scenario run JSON `summary`.
+   - `fb_winning_mutator_counts` accumulated per worker; aggregated + printed at
+     merge time; `per_mutator[m].wins` + `win_rate` in the merged summary.
+
+2. **Per-mutator no-op breakdown** — the aggregate `no_op_rate` (3.4%) hid which
+   mutator wasted queries; if all no-ops were TL that would be actionable but
+   invisible. Fixed: `fb_no_op_counts` tracked per mutator; aggregated as
+   `no_op_counts` + `per_mutator[m].no_op`/`no_op_rate` at merge; a mutator is
+   flagged (⚠️) when its own no-op rate > 25% even if the pool aggregate is low.
+
+3. **Run-config metadata** — the merged `metadata` didn't record seed / fallback
+   enabled / max_rounds / escalation / start_idx, so a result file didn't
+   self-describe which run it was. Fixed: worker `metadata` carries these; the
+   merger propagates them into merged `metadata` and prints them in the headline.
+
+4. **Per-worker fallback diagnostics in `worker_summaries`** — the merged
+   `worker_summaries` had only id/rounds/successes/success_rate, forcing
+   per-worker analysis to open each worker JSON. Fixed: `worker_summaries` now
+   include `mutation_fallback_triggered/successes/diagnostics`; the per-worker
+   print shows triggered/won/conv/no-op% per worker.
+
+### Files touched
+
+- `combination/src/mutation_fallback.py` — `winning_mutator` field + population.
+- `AutoRed-Final/experiment/llama_3_8b_vllm.py` — `_winning_mutator_from_trace`,
+  `winning_mutator` in both result-append paths + run JSON, `fb_no_op_counts` +
+  `fb_winning_mutator_counts` accumulation, run-config in worker `metadata`.
+- `AutoRed-Final/scripts/merge_benchmarks.py` — aggregate `no_op_counts` /
+  `winning_mutator_counts` / `per_mutator` table, run-config metadata, enriched
+  `worker_summaries`, new print blocks (per-mutator table + per-worker table).
+- Tests: `test_e2e_fallback.py` (+2 win-attribution tests), `test_merge.py`
+  (+3 per-mutator / config / worker-summary tests), `test_mutation_fallback.py`
+  (+1 field test). 47/47 GPU-free tests pass.
