@@ -157,6 +157,9 @@ _make_vllm_stub()
 _make_transformers_stub()
 
 # pandas/tqdm are lightweight enough to import for real; if absent, stub them.
+# IMPORTANT: the runtime does `from tqdm import tqdm` then `tqdm.pandas()`, so
+# the stub must mimic the real tqdm class — callable AND with a .pandas()
+# method — not a bare function. A bare-function stub breaks collection.
 try:
     import pandas  # noqa: F401
 except Exception:
@@ -168,8 +171,16 @@ try:
     from tqdm import tqdm  # noqa: F401
 except Exception:
     tqdm_mod = types.ModuleType("tqdm")
-    def _tqdm(*a, **k): return (a[0] if a else [])
-    tqdm_mod.tqdm = _tqdm
+
+    class _TqdmStub:  # mirrors tqdm.tqdm: callable + .pandas()
+        def __new__(cls, *a, **k):
+            return a[0] if a else []
+
+        @staticmethod
+        def pandas(*a, **k):
+            pass
+
+    tqdm_mod.tqdm = _TqdmStub
     sys.modules["tqdm"] = tqdm_mod
 
 
