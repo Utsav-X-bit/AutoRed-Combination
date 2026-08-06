@@ -75,7 +75,13 @@ def main():
     print(f"Metadata lookup table built with {len(lookup)} unique entries.")
 
     print("\n=== Finding Run JSON Files ===")
-    results_files = glob.glob("results/**/*.json", recursive=True)
+    # Exclude any backup of the pre-redesign results tree (results_old/ from the
+    # migration script, or results_bak/ from a manual rename) so only the live
+    # results/{benchmark,single}/ tree is parsed.
+    results_files = [
+        f for f in glob.glob("results/**/*.json", recursive=True)
+        if not f.startswith("results_old/") and not f.startswith("results_bak/")
+    ]
     results_bak_files = glob.glob("results-bak/**/*.json", recursive=True)
     all_files = results_files + results_bak_files
     print(f"Found {len(results_files)} files in results/")

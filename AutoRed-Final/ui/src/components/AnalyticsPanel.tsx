@@ -6,68 +6,106 @@ export default function AnalyticsPanel() {
 
   const { models, result, timing } = selectedRun;
 
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div className="border-b border-stone-200 p-4 last:border-b-0 dark:border-stone-800">
-      <h3 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">{title}</h3>
-      {children}
-    </div>
-  );
-
-  const Row = ({ label, children, valueClass }: { label: string; children: React.ReactNode; valueClass?: string }) => (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-stone-600 dark:text-stone-400">{label}</span>
-      <span className={`font-medium ${valueClass ?? 'text-stone-900 dark:text-stone-100'}`}>{children}</span>
-    </div>
-  );
-
   return (
-    <div className="flex h-full w-full flex-col overflow-y-auto border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
-      <Section title="Models">
+    <div className="w-full bg-white flex flex-col h-full overflow-y-auto">
+      {/* Models */}
+      <div className="p-4 border-b border-slate-200">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Models</h3>
         <div className="space-y-2">
-          <Row label="Generator">{models.generator.name.split('/').pop()}</Row>
-          <Row label="Victim">{models.victim.name.split('/').pop()}</Row>
-          <Row label="Judge">DistilBERT</Row>
-          <Row label="Extractor">{models.extractor.name.split('/').pop()}</Row>
+          <div className="text-sm">
+            <p className="text-slate-500 text-xs">Generator</p>
+            <p className="font-medium text-slate-900 truncate" title={models.generator.name}>{models.generator.name.split('/').pop()}</p>
+          </div>
+          <div className="text-sm">
+            <p className="text-slate-500 text-xs">Victim</p>
+            <p className="font-medium text-slate-900 truncate" title={models.victim.name}>{models.victim.name.split('/').pop()}</p>
+          </div>
+          <div className="text-sm">
+            <p className="text-slate-500 text-xs">Judge</p>
+            <p className="font-medium text-slate-900 truncate" title={models.judge.name}>DistilBERT</p>
+          </div>
+          <div className="text-sm">
+            <p className="text-slate-500 text-xs">Extractor</p>
+            <p className="font-medium text-slate-900 truncate" title={models.extractor.name}>{models.extractor.name.split('/').pop()}</p>
+          </div>
         </div>
-      </Section>
+      </div>
 
-      <Section title="Success">
+      {/* Success Metrics */}
+      <div className="p-4 border-b border-slate-200">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Success</h3>
         <div className="space-y-2">
-          <Row label="Ground Truth" valueClass={result.ground_truth_success ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-bold text-rose-600 dark:text-rose-400'}>
-            {result.ground_truth_success ? '✓' : '✗'}
-          </Row>
-          <Row label="Extractor" valueClass={result.extractor_success ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-bold text-rose-600 dark:text-rose-400'}>
-            {result.extractor_success ? '✓' : '✗'}
-          </Row>
-          <Row label="Verifier" valueClass={result.verified_success ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-bold text-rose-600 dark:text-rose-400'}>
-            {result.verified_success ? '✓' : '✗'}
-          </Row>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Ground Truth</span>
+            <span className={`font-bold ${result.ground_truth_success ? 'text-green-600' : 'text-red-600'}`}>
+              {result.ground_truth_success ? '✓' : '✗'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Extractor</span>
+            <span className={`font-bold ${result.extractor_success ? 'text-green-600' : 'text-red-600'}`}>
+              {result.extractor_success ? '✓' : '✗'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Verifier</span>
+            <span className={`font-bold ${result.verified_success ? 'text-green-600' : 'text-red-600'}`}>
+              {result.verified_success ? '✓' : '✗'}
+            </span>
+          </div>
         </div>
-      </Section>
+      </div>
 
-      <Section title="Attempts">
-        <div className="space-y-2">
-          <Row label="Total">{result.total_attempts}</Row>
-          <Row label="Success" valueClass={result.ground_truth_success ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-bold text-rose-600 dark:text-rose-400'}>
-            {result.ground_truth_success ? 'YES' : 'NO'}
-          </Row>
+      {/* Attempts */}
+      <div className="p-4 border-b border-slate-200">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Attempts</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-600">Total</span>
+            <span className="font-bold text-slate-900">{result.total_attempts}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Success</span>
+            <span className={`font-bold ${result.ground_truth_success ? 'text-green-600' : 'text-red-600'}`}>
+              {result.ground_truth_success ? 'YES' : 'NO'}
+            </span>
+          </div>
         </div>
-      </Section>
+      </div>
 
-      <Section title="Timing">
-        <div className="space-y-2">
-          <Row label="Total Run">{timing.total_run_time.toFixed(1)}s</Row>
-          <Row label="Avg Attempt">{timing.average_attempt_time.toFixed(1)}s</Row>
+      {/* Timing */}
+      <div className="p-4 border-b border-slate-200">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Timing</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-600">Total Run</span>
+            <span className="font-medium text-slate-900">{timing.total_run_time.toFixed(1)}s</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Avg Attempt</span>
+            <span className="font-medium text-slate-900">{timing.average_attempt_time.toFixed(1)}s</span>
+          </div>
         </div>
-      </Section>
+      </div>
 
-      <Section title="Summary">
-        <div className="space-y-2">
-          <Row label="Unique Attacks">{selectedRun.summary.unique_attacks}</Row>
-          <Row label="Repetition">{(selectedRun.summary.repetition_rate * 100).toFixed(1)}%</Row>
-          <Row label="Attack Len">{selectedRun.summary.attack_length_avg.toFixed(0)} chars</Row>
+      {/* Summary */}
+      <div className="p-4">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Summary</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-600">Unique Attacks</span>
+            <span className="font-medium text-slate-900">{selectedRun.summary.unique_attacks}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Repetition</span>
+            <span className="font-medium text-slate-900">{(selectedRun.summary.repetition_rate * 100).toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Attack Len</span>
+            <span className="font-medium text-slate-900">{selectedRun.summary.attack_length_avg.toFixed(0)} chars</span>
+          </div>
         </div>
-      </Section>
+      </div>
     </div>
   );
 }

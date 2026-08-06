@@ -4558,6 +4558,7 @@ def run_benchmark(
     num_workers: int = 1,
     start_idx: Optional[int] = None,
     seed: int = 42,
+    results_root: Optional[Path] = None,
 ) -> dict:
     """
     Phase 7: Run benchmark matching paper evaluation protocol.
@@ -4582,6 +4583,13 @@ def run_benchmark(
             "trace": [...] (only if verbose)
         }
     """
+    # --- New results-directory layout (experiment.results_layout) ---
+    from experiment.results_layout import runs_root as _runs_root, run_filename
+    if results_root is None:
+        results_root = _runs_root(None, "benchmark", "unknown", "benchmark_default")
+    runs_dir = results_root / "runs"
+    logs_dir = results_root / "logs"
+
     benchmark_started_at = datetime.now()
     print("\n" + "=" * 80)
     if num_workers > 1:
@@ -4716,7 +4724,14 @@ def run_benchmark(
                 if kb_updater is not None:
                     kb_updater.update_after_run(run_json)
                 success = attempts < MAX_INTERACTIONS
-                
+
+                # New results layout: write per-round run JSON into runs/{success,failed}/
+                stage_dir = runs_dir / ("success" if success else "failed")
+                fname = run_filename(scenario._defense_id, worker_id, batch_start + i + 1)
+                json_path = stage_dir / fname
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(run_json, f, indent=2, default=str)
+
                 # Check if this was a mutation fallback success
                 is_mutation_fb_success = any(
                     t.get("mutation_fallback", False) for t in trace
@@ -4843,7 +4858,14 @@ def run_benchmark(
                     kb_updater.update_after_run(run_json)
 
                 success = attempts < MAX_INTERACTIONS
-                
+
+                # New results layout: write per-round run JSON into runs/{success,failed}/
+                stage_dir = runs_dir / ("success" if success else "failed")
+                fname = run_filename(scenario._defense_id, worker_id, global_round_idx + 1)
+                json_path = stage_dir / fname
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(run_json, f, indent=2, default=str)
+
                 # Check if this was a mutation fallback success
                 is_mutation_fb_success = any(
                     t.get("mutation_fallback", False) for t in trace
@@ -5141,35 +5163,38 @@ def run_benchmark(
                 print(f"  ⚠️  High no-op rate — a mutator pool is likely offline/broken "
                       f"(e.g. TL without internet, or SR without nltk WordNet).")
 
-    # Save results
+    # Save results — new results layout: logs/worker_{id}.json is the primary
+    # worker summary; logs/merged_summary.json is produced by the HPC merge step.
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    worker_summary_path = logs_dir / f"worker_{worker_id}.json"
+    with open(worker_summary_path, "w", encoding="utf-8") as f:
+        json.dump(benchmark, f, indent=2)
+    print(f"\n[JSON] Worker summary saved to: {worker_summary_path}")
+    # Also keep the legacy BENCHMARK_LOG_PATH copy for back-compat with old tooling.
     benchmark_path = Path(BENCHMARK_LOG_PATH)
     benchmark_path.parent.mkdir(parents=True, exist_ok=True)
     with open(benchmark_path, "w", encoding="utf-8") as f:
         json.dump(benchmark, f, indent=2)
-    print(f"\n[JSON] Benchmark summary saved to: {benchmark_path}")
+    print(f"[JSON] Benchmark summary (legacy) saved to: {benchmark_path}")
 
-    # JSON emission: save per-round run JSONs INSIDE the benchmark output
-    # folder (Change 3) so a benchmark's runs live with its worker_*.json and
-    # merged_summary.json, not scattered under results/{date}/{model}/. The
-    # benchmark folder is the parent of BENCHMARK_LOG_PATH (the worker JSON).
-    # Fallback to the legacy dated path when BENCHMARK_LOG_PATH has no parent
-    # (e.g. a bare filename) so single-worker/smoke runs still work.
-    benchmark_output_dir = Path(BENCHMARK_LOG_PATH).parent
-    if benchmark_output_dir.name and benchmark_output_dir != Path("."):
-        results_dir = benchmark_output_dir / "runs"
-    else:
+    # Per-round run JSONs are written inline to runs/{success,failed}/ above
+    # (new results layout). The legacy dated-path emission is retained only as a
+    # fallback for single-worker/smoke runs that did not set results_root.
+    if len(benchmark_run_jsons) and not any((runs_dir / "success").glob("run_*.json")) and not any((runs_dir / "failed").glob("run_*.json")):
         results_dir = (
             Path("results")
             / benchmark_started_at.strftime("%Y-%m-%d")
             / _model_dir_name(LLAMA_PATH)
             / benchmark_started_at.strftime("%H-%M-%S_%f")
         )
-    results_dir.mkdir(parents=True, exist_ok=True)
-    for run_json in benchmark_run_jsons:
-        json_path = results_dir / f"{run_json['experiment']['run_id']}.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(run_json, f, indent=2, default=str)
-    print(f"[JSON] {len(benchmark_run_jsons)} run JSONs saved to: {results_dir}/")
+        results_dir.mkdir(parents=True, exist_ok=True)
+        for run_json in benchmark_run_jsons:
+            json_path = results_dir / f"{run_json['experiment']['run_id']}.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(run_json, f, indent=2, default=str)
+        print(f"[JSON] {len(benchmark_run_jsons)} run JSONs saved to: {results_dir}/")
+    else:
+        print(f"[JSON] {len(benchmark_run_jsons)} run JSONs saved to: {runs_dir}/")
 
     # Full KB / DB / RAG rebuild at benchmark boundary.
     if kb_updater is not None:
@@ -6210,7 +6235,7 @@ def _silent_test(scenario: DefenseScenario, agent: RedTeamingAgent) -> tuple:
 # =============================================================================
 
 
-def save_trace(trace: list, scenario: DefenseScenario, total_attempts: int):
+def save_trace(trace: list, scenario: DefenseScenario, total_attempts: int, logs_dir: Optional[Path] = None):
     """Save the full trace to a JSON file for later analysis."""
     output = {
         "metadata": {
@@ -6225,7 +6250,13 @@ def save_trace(trace: list, scenario: DefenseScenario, total_attempts: int):
         "trace": trace,
     }
 
-    trace_path = Path(TRACE_LOG_PATH)
+    # New results layout: when logs_dir is provided (benchmark/single mode),
+    # write verbose_trace.json into the benchmark's logs/ tree; otherwise fall
+    # back to the legacy TRACE_LOG_PATH.
+    if logs_dir is not None:
+        trace_path = logs_dir / "verbose_trace.json"
+    else:
+        trace_path = Path(TRACE_LOG_PATH)
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     with open(trace_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2)
@@ -6560,6 +6591,17 @@ if __name__ == "__main__":
         help="Where to save aggregate benchmark summary JSON",
     )
     parser.add_argument(
+        "--output-dir",
+        default=None,
+        help=(
+            "Primary results directory for the new results layout "
+            "(results/<mode>/<model_id>/<characteristics>). When set, per-round "
+            "run JSONs are written to <output-dir>/runs/{success,failed}/ and "
+            "worker summaries to <output-dir>/logs/. Supersedes --benchmark-output "
+            "(which is kept for back-compat as the legacy worker-JSON path)."
+        ),
+    )
+    parser.add_argument(
         "--worker-id",
         type=int,
         default=0,
@@ -6749,6 +6791,37 @@ if __name__ == "__main__":
     if getattr(args, "cooperative_n", None) is not None:
         _COOPERATIVE_N = max(8, min(int(args.cooperative_n), 12))  # clamp 8..12
 
+    # --- New results-directory layout wiring (experiment.results_layout) ---
+    from experiment.results_layout import (
+        resolve_model_id,
+        parse_output_dir,
+        runs_root,
+    )
+
+    _VICTIM_MODEL_ID = resolve_model_id(args.victim_model_id, LLAMA_PATH)
+    _MODE = args.mode if args.mode in ("benchmark", "single") else "benchmark"
+    if args.mode == "extractor_benchmark":
+        _MODE = "benchmark"  # extractor benchmark reuses the benchmark tree
+    _CHARS = parse_output_dir(args.output_dir, _MODE)[1]
+    RESULTS_ROOT = runs_root(args.output_dir, _MODE, _VICTIM_MODEL_ID, _CHARS)
+    print(f"[LAYOUT] results root: {RESULTS_ROOT}")
+
+    # If --output-dir was not given but --benchmark-output is non-default,
+    # treat the benchmark-output basename as the characteristics string so the
+    # legacy flag still routes results into the new tree. Warn that it's
+    # deprecated. The module-level default ("./tmp/autored_benchmark_results.json")
+    # is the sentinel for "user did not pass --benchmark-output".
+    _BENCHMARK_OUTPUT_DEFAULT = "./tmp/autored_benchmark_results.json"
+    if args.output_dir is None and args.benchmark_output != _BENCHMARK_OUTPUT_DEFAULT:
+        print(
+            "[WARN] --benchmark-output is deprecated; use --output-dir "
+            "results/<mode>/<characteristics>. Treating its basename as "
+            "characteristics."
+        )
+        _CHARS = parse_output_dir(args.benchmark_output, _MODE)[1]
+        RESULTS_ROOT = runs_root(None, _MODE, _VICTIM_MODEL_ID, _CHARS)
+        print(f"[LAYOUT] results root: {RESULTS_ROOT}")
+
     # Configure the post-run KB/DB/RAG updater.
     if kb_updater is not None:
         kb_updater.set_kb_updater(
@@ -6874,12 +6947,17 @@ if __name__ == "__main__":
             print_summary_table(trace)
             analyze_attack_evolution(trace)
 
-            # Save trace
-            save_trace(trace, scenario, tries)
-            print(
-                f"[JSON] UI run JSON available at: "
-                f"results/{run_json['experiment']['run_id']}.json"
-            )
+            # Save trace — new results layout: verbose_trace.json into logs/,
+            # run JSON into runs/{success,failed}/.
+            save_trace(trace, scenario, tries, logs_dir=RESULTS_ROOT / "logs")
+            from experiment.results_layout import single_run_filename
+            success = tries < MAX_INTERACTIONS
+            stage_dir = RESULTS_ROOT / "runs" / ("success" if success else "failed")
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            json_path = stage_dir / single_run_filename(scenario._defense_id)
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(run_json, f, indent=2, default=str)
+            print(f"[JSON] Run JSON saved to: {json_path}")
             print(f"[JSON] Raw terminal trace available at: {TRACE_LOG_PATH}")
 
             print(f"\n{'=' * 80}")
@@ -6903,4 +6981,5 @@ if __name__ == "__main__":
                 num_workers=getattr(args, "num_workers", 1),
                 start_idx=args.start_idx,
                 seed=args.seed,
+                results_root=RESULTS_ROOT,
             )

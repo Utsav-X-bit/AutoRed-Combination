@@ -188,5 +188,5 @@ def analyze(path):
 """)
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "results/benchmarks/batched_100r_4g/merged_summary.json"
+    path = sys.argv[1] if len(sys.argv) > 1 else "results/benchmark/unknown/batched_100r_4g/logs/merged_summary.json"
     analyze(path)

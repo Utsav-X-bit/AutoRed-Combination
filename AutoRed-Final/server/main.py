@@ -136,7 +136,12 @@ def api_list_benchmarks(limit: Optional[int] = Query(default=None, ge=0), offset
 
 @app.get("/api/benchmarks/{benchmark_id:path}")
 def api_get_benchmark(benchmark_id: str):
-    """Get benchmark summary plus associated trace archives."""
+    """Get benchmark summary plus associated trace runs.
+
+    ``benchmark_id`` uses the path converter so nested IDs of the form
+    "<model>/<chars>" (new results_layout.py tree) match across the slash.
+    Legacy single-segment IDs match unchanged.
+    """
     benchmark = get_benchmark(benchmark_id)
     if not benchmark:
         raise HTTPException(status_code=404, detail=f"Benchmark {benchmark_id} not found")

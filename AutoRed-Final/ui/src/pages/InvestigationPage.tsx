@@ -17,10 +17,10 @@ import PlannerInsightsPanel from '../components/PlannerInsightsPanel';
 import ResizeHandle from '../components/ResizeHandle';
 import { isRunSuccessful } from '../utils/success';
 
-const DEFAULT_LEFT_WIDTH = 280;
-const DEFAULT_RIGHT_WIDTH = 320;
+const DEFAULT_LEFT_WIDTH = 256;
+const DEFAULT_RIGHT_WIDTH = 288;
 const DEFAULT_BOTTOM_HEIGHT = 360;
-const MIN_SIDE_WIDTH = 200;
+const MIN_SIDE_WIDTH = 180;
 const MIN_CENTER_WIDTH = 420;
 const MIN_BOTTOM_HEIGHT = 160;
 const MIN_MAIN_HEIGHT = 220;
@@ -113,6 +113,7 @@ export default function InvestigationPage() {
     if (!runId) return;
     clearSelectedRun();
     setLoadError(null);
+    console.log('[InvestigationPage] Loading run:', runId);
 
     fetch(`/api/run/${encodeURIComponent(runId)}`)
       .then((res) => {
@@ -120,26 +121,33 @@ export default function InvestigationPage() {
         return res.json();
       })
       .then((data) => {
+        console.log('[InvestigationPage] Run loaded:', {
+          run_id: data.experiment?.run_id,
+          attempts_count: data.attempts?.length,
+          result: data.result,
+        });
         if (!data.attempts || !Array.isArray(data.attempts)) {
+          console.error('[InvestigationPage] Run data missing attempts array:', data);
           setLoadError('Invalid run data: missing attempts. The run file may be corrupted.');
           return;
         }
         setSelectedRun(data);
       })
       .catch((err) => {
+        console.error('[InvestigationPage] Failed to load run:', err);
         setLoadError(`Failed to load run: ${err.message}`);
       });
   }, [runId, clearSelectedRun, setSelectedRun]);
 
   if (loadError) {
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center bg-stone-50 dark:bg-stone-950">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-center">
-          <p className="font-display font-semibold text-rose-600 dark:text-rose-400">Error Loading Run</p>
-          <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">{loadError}</p>
+          <p className="text-red-600 font-medium mb-2">Error Loading Run</p>
+          <p className="text-sm text-slate-500 mb-4">{loadError}</p>
           <button
             onClick={() => navigate('/runs')}
-            className="mt-4 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 dark:bg-teal-600 dark:hover:bg-teal-500"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
           >
             ← Back to Runs
           </button>
@@ -150,11 +158,8 @@ export default function InvestigationPage() {
 
   if (!selectedRun) {
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center bg-stone-50 dark:bg-stone-950">
-        <div className="flex items-center gap-3 text-stone-500 dark:text-stone-400">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-teal-600 dark:border-stone-700 dark:border-t-teal-500" />
-          Loading run…
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-slate-500">Loading run...</p>
       </div>
     );
   }
@@ -163,16 +168,20 @@ export default function InvestigationPage() {
   const runSucceeded = isRunSuccessful(selectedRun);
   const hasPlannerData = selectedRun.attempts.some((item) => Boolean(item.generator.plan_raw));
   if (!attempt) {
+    console.error('[InvestigationPage] Attempt not found:', {
+      index: selectedAttemptIndex,
+      total_attempts: selectedRun.attempts?.length,
+    });
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center bg-stone-50 dark:bg-stone-950">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-center">
-          <p className="font-display font-semibold text-amber-600 dark:text-amber-400">No Attempt Data</p>
-          <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">
+          <p className="text-yellow-600 font-medium mb-2">No Attempt Data</p>
+          <p className="text-sm text-slate-500 mb-4">
             Attempt {selectedAttemptIndex + 1} not found (total: {selectedRun.attempts?.length || 0})
           </p>
           <button
             onClick={() => navigate('/runs')}
-            className="mt-4 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 dark:bg-teal-600 dark:hover:bg-teal-500"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
           >
             ← Back to Runs
           </button>
@@ -181,106 +190,88 @@ export default function InvestigationPage() {
     );
   }
 
-  const ToggleButton = ({
-    active,
-    onClick,
-    label,
-    title,
-  }: {
-    active: boolean;
-    onClick: () => void;
-    label: string;
-    title?: string;
-  }) => (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-        active
-          ? 'bg-stone-900 text-white dark:bg-teal-600 dark:text-white'
-          : 'bg-white text-stone-600 ring-1 ring-stone-200 hover:bg-stone-50 dark:bg-stone-900 dark:text-stone-300 dark:ring-stone-800 dark:hover:bg-stone-800'
-      }`}
-    >
-      {label}
-    </button>
-  );
-
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-stone-50 dark:bg-stone-950">
+    <div className="h-screen flex flex-col">
       {/* Top Bar */}
-      <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-stone-200 bg-white px-4 py-2.5 dark:border-stone-800 dark:bg-stone-900">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            onClick={() => navigate('/runs')}
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-            Runs
+      <header className="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/runs')} className="text-sm text-slate-500 hover:text-slate-900 transition-colors">
+            ← Runs
           </button>
-          <span className="text-stone-300 dark:text-stone-700">|</span>
-          <h1 className="font-mono text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
-            {selectedRun.experiment.run_id}
-          </h1>
-          <span className="hidden rounded-full bg-stone-100 px-2 py-0.5 font-mono text-[10px] text-stone-600 dark:bg-stone-800 dark:text-stone-400 sm:inline">
-            {selectedRun.experiment.scenario_id}
+          <span className="text-slate-300">|</span>
+          <h1 className="font-mono text-sm font-bold text-slate-900">{selectedRun.experiment.run_id}</h1>
+          <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-slate-100 text-slate-700">
+            scenario {selectedRun.experiment.scenario_id}
           </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              runSucceeded
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
-            }`}
-          >
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${runSucceeded ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
             {runSucceeded ? 'SUCCESS' : 'FAILED'}
           </span>
         </div>
-
-        <div className="flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-          <span className="hidden sm:inline">Attempt</span>
-          <span className="font-mono font-medium text-stone-900 dark:text-stone-100">
-            {attempt.attempt_number}/{selectedRun.result.total_attempts}
-          </span>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <span>Attempt {attempt.attempt_number}/{selectedRun.result.total_attempts}</span>
         </div>
-
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
-          <ToggleButton active={showTimeline} onClick={() => setShowTimeline((v) => !v)} label="Timeline" title="Show or hide the attempt timeline" />
-          <ToggleButton active={showPlanner} onClick={() => setShowPlanner((v) => !v)} label="Planner" title={hasPlannerData ? 'Show or hide planner analysis' : 'Legacy run: planner output is inferred'} />
-          <ToggleButton active={showAnalytics} onClick={() => setShowAnalytics((v) => !v)} label="Analytics" title="Show or hide analytics panel" />
-          <ToggleButton active={showTabs} onClick={() => setShowTabs((v) => !v)} label="Tabs" title="Show or hide deep analysis tabs" />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTimeline((value) => !value)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${showTimeline ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+            title="Show or hide the attempt timeline"
+          >
+            Timeline
+          </button>
+          <button
+            onClick={() => setShowPlanner((value) => !value)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${showPlanner ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+            title={hasPlannerData ? 'Show or hide the planner analysis' : 'Legacy run: planner output is inferred from history'}
+          >
+            Planner
+          </button>
+          <button
+            onClick={() => setShowAnalytics((value) => !value)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${showAnalytics ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+            title="Show or hide the analytics panel"
+          >
+            Analytics
+          </button>
+          <button
+            onClick={() => setShowTabs((value) => !value)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${showTabs ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+            title="Show or hide the deep analysis tabs"
+          >
+            Tabs
+          </button>
           <button
             onClick={resetLayout}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+            className="px-3 py-1.5 text-slate-500 hover:text-slate-900 text-xs font-medium transition-colors"
             title="Reset all panel sizes"
           >
-            Reset
+            Reset Layout
           </button>
-          <div className="h-5 w-px bg-stone-200 dark:bg-stone-800 mx-1" />
           <a
             href={`/api/export/${selectedRun.experiment.run_id}/json`}
             download={`${selectedRun.experiment.run_id}.json`}
-            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 dark:bg-stone-900 dark:text-stone-300 dark:ring-stone-800 dark:hover:bg-stone-800"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors"
           >
-            JSON
+            Export JSON
           </a>
           <a
             href={`/api/export/${selectedRun.experiment.run_id}/csv`}
             download={`${selectedRun.experiment.run_id}.csv`}
-            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 dark:bg-stone-900 dark:text-stone-300 dark:ring-stone-800 dark:hover:bg-stone-800"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors"
           >
-            CSV
+            Export CSV
           </a>
           <a
             href={`/api/export/${selectedRun.experiment.run_id}/html`}
             download={`${selectedRun.experiment.run_id}.html`}
-            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 dark:bg-stone-900 dark:text-stone-300 dark:ring-stone-800 dark:hover:bg-stone-800"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors"
           >
-            HTML
+            Export HTML
           </a>
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 flex overflow-hidden">
           {showTimeline && (
             <>
               <aside
@@ -304,50 +295,32 @@ export default function InvestigationPage() {
             </>
           )}
 
-          <main className="min-w-0 flex-1 overflow-y-auto bg-stone-50 p-4 dark:bg-stone-950 lg:p-5">
-            <div className="mx-auto w-full max-w-5xl space-y-4">
-              {showPlanner && (
-                <PlannerInsightsPanel run={selectedRun} selectedAttemptIndex={selectedAttemptIndex} />
-              )}
+          <main className="flex-1 min-w-0 overflow-y-auto bg-slate-50 p-6">
+            <div className="w-full max-w-6xl mx-auto space-y-4">
+            {showPlanner && (
+              <PlannerInsightsPanel run={selectedRun} selectedAttemptIndex={selectedAttemptIndex} />
+            )}
+            {/* Attempt Header */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900">Attempt {attempt.attempt_number}</h2>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                  {attempt.generator.strategy}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${attempt.judge.decision === 'ATTACK' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                  {attempt.judge.decision} ({attempt.judge.confidence.toFixed(2)})
+                </span>
+              </div>
+            </div>
 
-              {/* Attempt Header */}
-              <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm dark:border-stone-800 dark:bg-stone-900">
-                <div>
-                  <h2 className="font-display text-lg font-semibold text-stone-900 dark:text-stone-100">
-                    Attempt {attempt.attempt_number}
-                  </h2>
-                  <p className="text-xs text-stone-500 dark:text-stone-400">{formatDateTime(attempt.timestamp)}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700 dark:bg-purple-950/50 dark:text-purple-300">
-                    {attempt.generator.strategy}
-                  </span>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      attempt.judge.decision === 'ATTACK'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400'
-                        : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400'
-                    }`}
-                  >
-                    {attempt.judge.decision} ({attempt.judge.confidence.toFixed(2)})
-                  </span>
-                </div>
-              </div>
-
-              {/* Pipeline */}
-              <GeneratorCard attempt={attempt} />
-              <div className="flex justify-center py-1 text-stone-300 dark:text-stone-700">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M19 12l-7 7-7-7" /></svg>
-              </div>
-              <VictimCard attempt={attempt} accessCode={selectedRun.scenario.access_code} />
-              <div className="flex justify-center py-1 text-stone-300 dark:text-stone-700">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M19 12l-7 7-7-7" /></svg>
-              </div>
-              <ExtractorCard attempt={attempt} />
-              <div className="flex justify-center py-1 text-stone-300 dark:text-stone-700">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M19 12l-7 7-7-7" /></svg>
-              </div>
-              <VerifierCard attempt={attempt} />
+            {/* Pipeline */}
+            <GeneratorCard attempt={attempt} />
+            <div className="flex justify-center text-slate-400 text-lg">↓</div>
+            <VictimCard attempt={attempt} accessCode={selectedRun.scenario.access_code} />
+            <div className="flex justify-center text-slate-400 text-lg">↓</div>
+            <ExtractorCard attempt={attempt} />
+            <div className="flex justify-center text-slate-400 text-lg">↓</div>
+            <VerifierCard attempt={attempt} />
             </div>
           </main>
 
@@ -390,7 +363,7 @@ export default function InvestigationPage() {
               onReset={() => setBottomHeight(DEFAULT_BOTTOM_HEIGHT)}
             />
             <section
-              className="flex-shrink-0 min-h-0 overflow-hidden border-t border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
+              className="flex-shrink-0 min-h-0 overflow-hidden"
               style={{ height: bottomHeight }}
             >
               <InvestigationTabs />
@@ -400,11 +373,4 @@ export default function InvestigationPage() {
       </div>
     </div>
   );
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? 'n/a'
-    : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }

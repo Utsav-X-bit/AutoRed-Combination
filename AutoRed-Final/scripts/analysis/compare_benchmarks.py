@@ -89,37 +89,64 @@ def _load_json(path):
 
 
 def _benchmark_sort_key(path: Path):
-    summary = _load_json(path / "merged_summary.json")
-    if summary:
-        ts = _parse_timestamp(summary.get("metadata", {}).get("timestamp"))
-        if ts is not None:
-            return ts
-    worker0 = _load_json(path / "worker_0.json")
-    if worker0:
-        ts = _parse_timestamp(worker0.get("metadata", {}).get("timestamp"))
-        if ts is not None:
-            return ts
+    """Sort key for benchmark dirs; returns a timezone-naive datetime.
+
+    Handles both layouts: ``<path>/merged_summary.json`` (legacy) and
+    ``<path>/logs/merged_summary.json`` (new nested). All return values are
+    normalized to naive datetimes so mixed aware/naive comparisons never raise.
+    """
+    for summary_path in (path / "merged_summary.json", path / "logs" / "merged_summary.json"):
+        summary = _load_json(summary_path)
+        if summary:
+            ts = _parse_timestamp(summary.get("metadata", {}).get("timestamp"))
+            if ts is not None:
+                return ts.replace(tzinfo=None) if ts.tzinfo else ts
+    for worker_path in (path / "worker_0.json", path / "logs" / "worker_0.json"):
+        worker0 = _load_json(worker_path)
+        if worker0:
+            ts = _parse_timestamp(worker0.get("metadata", {}).get("timestamp"))
+            if ts is not None:
+                return ts.replace(tzinfo=None) if ts.tzinfo else ts
     return datetime.fromtimestamp(path.stat().st_mtime)
 
 
 def discover_benchmark_dirs(benchmarks_root: str):
+    """Discover benchmark directories under ``benchmarks_root``.
+
+    Supports the legacy flat layout (``<root>/<name>/merged_summary.json``)
+    and, when ``benchmarks_root`` is the project ``results`` dir, the new
+    nested layout (``results/benchmark/<model>/<chars>/logs/merged_summary.json``).
+    """
     root = Path(benchmarks_root)
-    if not root.exists():
-        return []
     candidates = []
-    for child in sorted(root.iterdir()):
-        if not child.is_dir() or child.name == "smoke":
-            continue
-        # Flat (legacy): merged_summary.json directly under the dated folder.
-        if (child / "merged_summary.json").exists() or list(child.glob("worker_*.json")):
-            candidates.append(child)
-            continue
-        # Nested (Change 3): group/run/merged_summary.json — walk one level down.
-        for sub in sorted(child.iterdir()):
-            if not sub.is_dir() or sub.name == "smoke":
+    if root.exists():
+        for child in root.iterdir():
+            if not child.is_dir():
                 continue
-            if (sub / "merged_summary.json").exists() or list(sub.glob("worker_*.json")):
-                candidates.append(sub)
+            if (child / "merged_summary.json").exists() or list(child.glob("worker_*.json")):
+                candidates.append(child)
+
+    # New nested layout: results/benchmark/<model>/<chars>/logs/merged_summary.json.
+    # Discovered when benchmarks_root is "results" (or "results/benchmarks" and
+    # a sibling "benchmark" dir exists). Use the <chars> dir as the benchmark dir
+    # so callers see logs/merged_summary.json and runs/{success,failed}.
+    nested_root = None
+    if root.name == "benchmarks":
+        nested_root = root.parent / "benchmark"
+    elif root.name == "results":
+        nested_root = root / "benchmark"
+    elif (root.parent / "benchmark").exists():
+        nested_root = root.parent / "benchmark"
+    if nested_root and nested_root.exists():
+        for model_dir in sorted(nested_root.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            for chars_dir in sorted(model_dir.iterdir()):
+                if not chars_dir.is_dir():
+                    continue
+                if (chars_dir / "logs" / "merged_summary.json").exists():
+                    candidates.append(chars_dir)
+
     return sorted(candidates, key=_benchmark_sort_key)
 
 
@@ -153,10 +180,14 @@ def resolve_benchmark_path(arg_value: str, benchmarks_root: str, kind: str, curr
 
 
 def resolve_trace_root_for_benchmark(benchmark_dir: Path, traces_root: str):
-    # Change 3: per-run trace JSONs now live inside the benchmark folder under
-    # runs/. Prefer that (self-contained) and fall back to the date-based glob.
+    """Return the directory holding this benchmark's run_*.json traces.
+
+    New layout: ``<benchmark_dir>/runs`` (created by results_layout.py) is
+    preferred when present, regardless of timestamp. Legacy layout falls back
+    to the date-based archive tree under ``traces_root``.
+    """
     runs_dir = benchmark_dir / "runs"
-    if runs_dir.exists() and list(runs_dir.glob("run_*.json")):
+    if runs_dir.exists() and list(runs_dir.rglob("run_*.json")):
         return runs_dir
 
     summary = _load_json(benchmark_dir / "merged_summary.json")

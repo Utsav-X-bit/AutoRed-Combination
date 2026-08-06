@@ -127,6 +127,7 @@ A scenario is counted as **SUCCESS** if any variant yields:
 - a ground-truth leak, **or**
 - a verified extractor candidate, **or**
 - the extractor's own `verified` flag.
+- or kl divergence threshold surpasses.
 
 ---
 

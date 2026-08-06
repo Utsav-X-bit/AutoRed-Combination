@@ -7,36 +7,39 @@ interface Props {
 }
 
 const formatPct = (value: number) => `${(value * 100).toFixed(1)}%`;
-const formatNumber = (value: number) => (Number.isFinite(value) ? value.toFixed(2) : 'n/a');
+
+const formatNumber = (value: number) => Number.isFinite(value) ? value.toFixed(2) : 'n/a';
 
 export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Props) {
   const attempt = run.attempts[selectedAttemptIndex];
-  const parsedPlan = parsePlanText(attempt?.generator.plan_raw, attempt?.generator);
+  const parsedPlan = parsePlanText(attempt?.generator.plan_raw);
   const state = buildPlannerState(run, selectedAttemptIndex);
   const timeline = attemptTimeline(run);
   const rows = strategyRows(run.strategy_stats);
   const kbRag = kbRagSummary(run);
 
   return (
-    <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="font-display text-base font-semibold text-stone-900 dark:text-stone-100">Planner analysis</h3>
-          <p className="max-w-2xl text-xs text-stone-500 dark:text-stone-400">
-            Planner contract output, best-known plan, state progression, and KB/RAG signals.
+          <h3 className="text-sm font-bold text-slate-900">Planner analysis</h3>
+          <p className="text-xs text-slate-500">
+            Shows the contract output, the best-known plan, state progression, and the KB/RAG signals used for planning.
           </p>
         </div>
-        <div className="text-right text-xs text-stone-500 dark:text-stone-400">
+        <div className="text-right text-xs text-slate-500">
           <div>Attempt {state.attempt_number}</div>
           <div>{state.success_so_far} success(es) so far</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Current planner output</h4>
-            <span className="text-xs text-stone-400 dark:text-stone-500">{attempt?.generator.plan_raw ? 'new pipeline' : 'legacy run'}</span>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current planner output</h4>
+            <span className="text-xs text-slate-500">
+              {attempt?.generator.plan_raw ? 'new pipeline' : 'legacy run'}
+            </span>
           </div>
           {parsedPlan ? (
             <div className="space-y-2 text-sm">
@@ -49,31 +52,33 @@ export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Prop
                 <Field label="Failure reason" value={parsedPlan.failure_reason} />
               </div>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Primitives</p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
+                <p className="text-xs text-slate-500 mb-1">Primitives</p>
+                <div className="flex flex-wrap gap-1.5">
                   {parsedPlan.primitives.length ? parsedPlan.primitives.map((primitive) => (
-                    <span key={primitive} className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-700 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300">
+                    <span key={primitive} className="px-2 py-1 rounded-md bg-white border border-slate-200 text-xs text-slate-700">
                       {primitive}
                     </span>
-                  )) : <span className="text-xs text-stone-400 dark:text-stone-500">No explicit primitive list.</span>}
+                  )) : <span className="text-xs text-slate-400">No explicit primitive list in this run.</span>}
                 </div>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-stone-500 dark:text-stone-400">Older runs only store strategy and generated attack.</p>
+            <p className="text-sm text-slate-500">
+              Older runs only store the selected strategy and generated attack. The planner XML is available only for newer runs.
+            </p>
           )}
           {attempt?.generator.plan_raw && (
             <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-medium text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300">Show raw plan XML</summary>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-stone-200 bg-white p-3 text-xs dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300">
+              <summary className="cursor-pointer text-xs text-blue-600 hover:text-blue-700">Show raw plan XML</summary>
+              <pre className="mt-2 text-xs whitespace-pre-wrap bg-white border border-slate-200 rounded-lg p-3 max-h-64 overflow-auto">
                 {attempt.generator.plan_raw}
               </pre>
             </details>
           )}
         </div>
 
-        <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">State</h4>
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">State</h4>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <Field label="Current strategy" value={state.current_strategy} />
             <Field label="Previous strategy" value={state.previous_strategy} />
@@ -82,76 +87,76 @@ export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Prop
             <Field label="Leaked so far" value={state.leak_seen ? 'yes' : 'no'} />
             <Field label="Verified so far" value={state.verified_seen ? 'yes' : 'no'} />
           </div>
-          <p className="mt-3 text-xs text-stone-500 dark:text-stone-500">
-            State is derived from run history when no explicit planner snapshot exists.
-          </p>
+          <div className="mt-3 text-xs text-slate-500">
+            The state is derived from run history when the runtime does not emit an explicit planner state snapshot.
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Best plan</h4>
-            <span className="text-xs text-stone-400 dark:text-stone-500">{run.best_attack ? 'available' : 'missing'}</span>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Best plan</h4>
+            <span className="text-xs text-slate-500">{run.best_attack ? 'available' : 'missing'}</span>
           </div>
           {run.best_attack ? (
             <div className="space-y-2 text-sm">
               <Field label="Best strategy" value={run.best_attack.strategy} />
               <Field label="Best score" value={formatNumber(run.best_attack.score)} />
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Best attack prompt</p>
-                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-stone-200 bg-white p-3 text-xs dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300">
+                <p className="text-xs text-slate-500 mb-1">Best attack prompt</p>
+                <pre className="whitespace-pre-wrap text-xs bg-white border border-slate-200 rounded-lg p-3 max-h-40 overflow-auto">
                   {run.best_attack.prompt}
                 </pre>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-stone-500 dark:text-stone-400">No best plan was recorded for this run.</p>
+            <p className="text-sm text-slate-500">No best plan was recorded for this run.</p>
           )}
         </div>
 
-        <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">KB / RAG usage</h4>
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">KB / RAG usage</h4>
           <div className="space-y-2 text-sm">
             {kbRag.map((item) => (
-              <div key={item.name} className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
+              <div key={item.name} className="bg-white border border-slate-200 rounded-lg p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">{item.name}</span>
-                  <span className="text-xs text-stone-400 dark:text-stone-500">{item.summary}</span>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.name}</span>
+                  <span className="text-xs text-slate-400">{item.summary}</span>
                 </div>
-                <p className="mt-2 text-sm text-stone-700 dark:text-stone-300">{item.value}</p>
+                <p className="mt-2 text-sm text-slate-700">{item.value}</p>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Strategy performance</h4>
-          <span className="text-xs text-stone-400 dark:text-stone-500">{rows.length} strategies</span>
+      <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Strategy performance</h4>
+          <span className="text-xs text-slate-500">{rows.length} strategies</span>
         </div>
-        <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-stone-100 text-left text-xs font-semibold uppercase tracking-wider text-stone-600 dark:bg-stone-800 dark:text-stone-400">
-              <tr>
-                <th className="px-3 py-2">Strategy</th>
-                <th className="px-3 py-2 text-right">Successes</th>
-                <th className="px-3 py-2 text-right">Partial</th>
-                <th className="px-3 py-2 text-right">Failures</th>
-                <th className="px-3 py-2 text-right">Rate</th>
-                <th className="px-3 py-2 text-right">Score</th>
+            <thead>
+              <tr className="border-b border-slate-200 text-xs text-slate-500">
+                <th className="text-left py-2 pr-3">Strategy</th>
+                <th className="text-right py-2 pr-3">Successes</th>
+                <th className="text-right py-2 pr-3">Partial</th>
+                <th className="text-right py-2 pr-3">Failures</th>
+                <th className="text-right py-2 pr-3">Rate</th>
+                <th className="text-right py-2 pr-3">Score</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-stone-100 dark:divide-stone-800 bg-white dark:bg-stone-900">
+            <tbody>
               {rows.map((row) => (
-                <tr key={row.strategy} className="hover:bg-stone-50 dark:hover:bg-stone-800/50">
-                  <td className="px-3 py-2 font-mono text-xs text-stone-700 dark:text-stone-300">{row.strategy}</td>
-                  <td className="px-3 py-2 text-right text-stone-900 dark:text-stone-100">{row.successes}</td>
-                  <td className="px-3 py-2 text-right text-stone-900 dark:text-stone-100">{row.partial_leaks}</td>
-                  <td className="px-3 py-2 text-right text-stone-900 dark:text-stone-100">{row.failures}</td>
-                  <td className="px-3 py-2 text-right font-medium text-stone-900 dark:text-stone-100">{formatPct(row.successRate)}</td>
-                  <td className="px-3 py-2 text-right text-stone-900 dark:text-stone-100">{formatNumber(row.total_score)}</td>
+                <tr key={row.strategy} className="border-b border-slate-100">
+                  <td className="py-2 pr-3 font-mono text-xs">{row.strategy}</td>
+                  <td className="py-2 pr-3 text-right">{row.successes}</td>
+                  <td className="py-2 pr-3 text-right">{row.partial_leaks}</td>
+                  <td className="py-2 pr-3 text-right">{row.failures}</td>
+                  <td className="py-2 pr-3 text-right">{formatPct(row.successRate)}</td>
+                  <td className="py-2 pr-3 text-right">{formatNumber(row.total_score)}</td>
                 </tr>
               ))}
             </tbody>
@@ -159,25 +164,22 @@ export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Prop
         </div>
       </div>
 
-      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/50">
-        <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">Timeline</h4>
-        <div className="max-h-72 space-y-2 overflow-auto pr-1">
+      <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Timeline</h4>
+        <div className="space-y-2 max-h-72 overflow-auto pr-1">
           {timeline.map((item) => (
-            <div
-              key={item.attempt_number}
-              className={`rounded-lg border bg-white p-3 dark:bg-stone-950 ${item.attempt_number === state.attempt_number ? 'border-teal-300 ring-1 ring-teal-200 dark:border-teal-700 dark:ring-teal-900/50' : 'border-stone-200 dark:border-stone-800'}`}
-            >
+            <div key={item.attempt_number} className={`rounded-lg border p-3 bg-white ${item.attempt_number === state.attempt_number ? 'border-blue-300 ring-1 ring-blue-200' : 'border-slate-200'}`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">Attempt {item.attempt_number}</p>
-                  <p className="text-xs text-stone-500 dark:text-stone-400">{item.strategy} · {item.time_ms} ms</p>
+                  <p className="text-sm font-semibold text-slate-900">Attempt {item.attempt_number}</p>
+                  <p className="text-xs text-slate-500">{item.strategy} · {item.time_ms} ms · {item.timestamp || 'n/a'}</p>
                 </div>
-                <span className={`text-xs font-semibold ${item.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-500 dark:text-stone-500'}`}>
+                <span className={`text-xs font-semibold ${item.success ? 'text-green-600' : 'text-slate-500'}`}>
                   {item.success ? 'success' : 'open'}
                 </span>
               </div>
-              <p className="mt-2 text-xs text-stone-600 dark:text-stone-400">
-                State: {item.state.previous_outcome}. {item.state.success_so_far} success signal(s) in {item.state.attempts_so_far} attempt(s).
+              <p className="mt-2 text-xs text-slate-600">
+                State: {item.state.previous_outcome}. Planner saw {item.state.success_so_far} success signal(s) in {item.state.attempts_so_far} attempt(s).
               </p>
             </div>
           ))}
@@ -189,9 +191,9 @@ export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Prop
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-2 dark:border-stone-800 dark:bg-stone-900">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">{label}</p>
-      <p className="break-words text-sm font-medium text-stone-900 dark:text-stone-100">{value}</p>
+    <div className="bg-white border border-slate-200 rounded-lg p-2">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-sm font-medium text-slate-900 break-words">{value}</p>
     </div>
   );
 }

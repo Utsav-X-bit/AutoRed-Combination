@@ -21,23 +21,23 @@ export default function InvestigationTabs() {
   const [activeTab, setActiveTab] = useState('scenario');
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-stone-900">
-      <div className="flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-stone-200 px-4 dark:border-stone-800">
+    <div className="bg-white h-full min-h-0 flex flex-col">
+      <div className="flex items-center gap-1 px-4 border-b border-slate-200 overflow-x-auto flex-shrink-0">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.id
-                ? 'border-teal-500 text-teal-600 dark:border-teal-500 dark:text-teal-400'
-                : 'border-transparent text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
             {tab.label}
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-stone-50 p-4 dark:bg-stone-950">
+      <div className="p-4 flex-1 min-h-0 overflow-y-auto bg-slate-50">
         {activeTab === 'scenario' && <ScenarioTab />}
         {activeTab === 'evolution' && <AttackEvolutionTab />}
         {activeTab === 'heatmap' && <StrategyHeatmapTab />}

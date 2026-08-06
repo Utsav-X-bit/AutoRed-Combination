@@ -223,6 +223,10 @@ export interface BenchmarkMetrics {
 
 export interface BenchmarkListItem {
   benchmark_id: string;
+  /** Model group for nested-layout ids ("<model>/<chars>"); null for legacy flat ids. */
+  benchmark_group?: string | null;
+  /** On-disk layout: "nested" (results/benchmark/<model>/<chars>) or "legacy" (results/benchmarks/<name>). */
+  layout?: "nested" | "legacy";
   file_path: string;
   timestamp: string;
   total_rounds: number;
@@ -275,6 +279,8 @@ export interface TraceArchiveDetail {
 
 export interface BenchmarkDetail {
   benchmark_id: string;
+  benchmark_group?: string | null;
+  layout?: "nested" | "legacy";
   summary: Record<string, any>;
   metadata: Record<string, any>;
   worker_summaries: BenchmarkWorkerSummary[];
@@ -292,51 +298,4 @@ export interface RunComplete {
   type: "run_complete";
   run_id: string;
   run: AutoRedRun;
-}
-
-// --- JailGuard Mutation Fallback diagnostics (Change 2) ---
-// Optional overlays on BenchmarkDetail.summary (Record<string, any>). The
-// merged_summary.json carries these when mutation fallback ran; the dashboard
-// renders them in a dedicated panel.
-
-export interface PerMutatorDiagnostics {
-  drawn: number;
-  no_op: number;
-  no_op_rate: number;
-  wins: number;
-  win_rate: number;
-}
-
-export interface MutationFallbackDiagnostics {
-  variant_total: number;
-  no_op_total: number;
-  no_op_rate: number;
-  mutator_counts: Record<string, number>;
-  no_op_counts: Record<string, number>;
-  winning_mutator_counts: Record<string, number>;
-  per_mutator: Record<string, PerMutatorDiagnostics>;
-}
-
-export interface SuccessPathBreakdownEntry {
-  path: string;
-  count: number;
-  pct_of_total: number;
-  pct_of_successes: number;
-}
-
-export interface FailureModeBreakdownEntry {
-  mode: string;
-  count: number;
-  pct_of_failures: number;
-  pct_of_total: number;
-}
-
-export interface FallbackRunConfig {
-  mutation_fallback_enabled?: boolean;
-  max_fallback_rounds?: number;
-  cooperative_seeding?: boolean;
-  cooperative_n?: number;
-  seed?: number;
-  start_idx?: number;
-  planner_temp_escalation?: number;
 }

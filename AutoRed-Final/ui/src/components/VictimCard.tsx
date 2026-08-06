@@ -4,14 +4,14 @@ export default function VictimCard({ attempt, accessCode }: { attempt: Attempt; 
   const response = attempt.victim.raw_output;
 
   const renderHighlightedResponse = () => {
-    if (!accessCode || !response) return <p className="whitespace-pre-wrap text-sm text-stone-700 dark:text-stone-300">{response}</p>;
+    if (!accessCode || !response) return <p className="text-sm text-slate-700 whitespace-pre-wrap">{response}</p>;
     const escaped = accessCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const parts = response.split(new RegExp(`(${escaped})`, 'gi'));
     return (
-      <p className="whitespace-pre-wrap text-sm text-stone-700 dark:text-stone-300">
+      <p className="text-sm text-slate-700 whitespace-pre-wrap">
         {parts.map((part, i) =>
           part.toLowerCase() === accessCode.toLowerCase() ? (
-            <mark key={i} className="rounded bg-amber-200 px-1 font-bold text-amber-900 dark:bg-amber-600/40 dark:text-amber-100">{part}</mark>
+            <mark key={i} className="bg-yellow-200 text-yellow-900 px-1 rounded font-bold">{part}</mark>
           ) : (
             <span key={i}>{part}</span>
           )
@@ -21,21 +21,20 @@ export default function VictimCard({ attempt, accessCode }: { attempt: Attempt; 
   };
 
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-stone-900 dark:text-stone-100">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800">🦙</span>
-          Victim Response
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <span className="text-lg">🦙</span> Victim Response
         </h3>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-stone-500 dark:text-stone-400">{attempt.victim.output_length} chars</span>
-          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${attempt.ground_truth_found ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400' : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>
-            GT Found: {attempt.ground_truth_found ? 'YES' : 'NO'}
+          <span className="text-xs text-slate-500">{attempt.victim.output_length} chars</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${attempt.ground_truth_found ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>
+            GT Found: {attempt.ground_truth_found ? '✓ YES' : '✗ NO'}
           </span>
         </div>
       </div>
 
-      <div className="max-h-80 overflow-y-auto rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-800 dark:bg-stone-950">
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 max-h-64 overflow-y-auto">
         {renderHighlightedResponse()}
       </div>
     </div>

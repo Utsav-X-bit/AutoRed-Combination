@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRunStore } from '../store/runStore';
 import type { AutoRedRun } from '../types/autored';
@@ -25,81 +25,82 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
   const wsConnected = useRef(false);
   const runCompleted = useRef(false);
 
-  const connectWebSocket = useCallback(
-    (rid: string) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/run/${rid}`;
-      console.log(`[NewRun WS] Opening WebSocket: ${wsUrl}`);
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      wsConnected.current = false;
-      runCompleted.current = false;
+  const connectWebSocket = useCallback((rid: string) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/run/${rid}`;
+    console.log(`[NewRun WS] Opening WebSocket: ${wsUrl}`);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    wsConnected.current = false;
+    runCompleted.current = false;
 
-      ws.onopen = () => {
-        wsConnected.current = true;
-        console.log(`[NewRun WS] WebSocket opened for run_id=${rid}`);
-      };
+    ws.onopen = () => {
+      wsConnected.current = true;
+      console.log(`[NewRun WS] ✓ WebSocket opened for run_id=${rid}`);
+    };
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log(`[NewRun WS] Received message type=${data.type}, run_id=${data.run_id}`);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log(`[NewRun WS] Received message type=${data.type}, run_id=${data.run_id}`);
 
-          if (data.type === 'attempt_update') {
-            const attemptNum = data.attempt.attempt_number;
-            console.log(`[NewRun WS] Attempt #${attemptNum} received, ground_truth_found=${data.attempt.ground_truth_found}`);
-            setCurrentAttempt(attemptNum);
-            setTotalAttempts(attemptNum);
-            if (data.attempt.ground_truth_found) {
-              console.log('[NewRun WS] Ground truth found in this attempt!');
-              setSuccess(true);
-            }
-          } else if (data.type === 'run_complete') {
-            runCompleted.current = true;
-            console.log('[NewRun WS] run_complete received');
-            const rawRun = (data as { run: unknown }).run;
-            if (rawRun && typeof rawRun === 'object' && 'error' in rawRun) {
-              console.error('[NewRun WS] Run completed with error:', (rawRun as { error: string }).error);
-              setError((rawRun as { error: string }).error);
-            } else {
-              const run = rawRun as AutoRedRun;
-              console.log('[NewRun WS] Run complete - success:', run.result?.ground_truth_success, 'attempts:', run.result?.total_attempts);
-              setSuccess(
-                Boolean(run.result?.ground_truth_success || run.result?.extractor_success || run.result?.verified_success),
-              );
-              setTotalAttempts(run.result?.total_attempts ?? 0);
-              setSelectedRun(run);
-            }
-            ws.close();
-            wsRef.current = null;
-            setRunning(false);
+        if (data.type === 'attempt_update') {
+          const attemptNum = data.attempt.attempt_number;
+          console.log(`[NewRun WS] Attempt #${attemptNum} received, ground_truth_found=${data.attempt.ground_truth_found}`);
+          setCurrentAttempt(attemptNum);
+          setTotalAttempts(attemptNum);
+          if (data.attempt.ground_truth_found) {
+            console.log('[NewRun WS] ✓ Ground truth found in this attempt!');
+            setSuccess(true);
           }
-        } catch (e) {
-          console.error('[NewRun WS] Message parse error:', e);
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.log(`[NewRun WS] WebSocket closed: code=${event.code}, reason=${event.reason}`);
-        const wasConnected = wsConnected.current;
-        wsRef.current = null;
-        wsConnected.current = false;
-        if (running && wasConnected && !runCompleted.current && !error) {
-          setError('Live connection closed before the run completed.');
+        } else if (data.type === 'run_complete') {
+          runCompleted.current = true;
+          console.log('[NewRun WS] ✓ run_complete received');
+          const rawRun = (data as { run: unknown }).run;
+          if (rawRun && typeof rawRun === 'object' && 'error' in rawRun) {
+            console.error('[NewRun WS] Run completed with error:', (rawRun as { error: string }).error);
+            setError((rawRun as { error: string }).error);
+          } else {
+            const run = rawRun as AutoRedRun;
+            console.log('[NewRun WS] Run complete - success:', run.result?.ground_truth_success, 'attempts:', run.result?.total_attempts);
+            console.log('[NewRun WS] Run attempts array length:', run.attempts?.length);
+            setSuccess(Boolean(
+              run.result?.ground_truth_success
+              || run.result?.extractor_success
+              || run.result?.verified_success
+            ));
+            setTotalAttempts(run.result?.total_attempts ?? 0);
+            setSelectedRun(run);
+          }
+          ws.close();
+          wsRef.current = null;
           setRunning(false);
         }
-      };
+      } catch (e) {
+        console.error('[NewRun WS] Message parse error:', e);
+      }
+    };
 
-      ws.onerror = (err) => {
-        console.error('[NewRun WS] WebSocket error:', err);
-        if (!wsConnected.current) {
-          setError('Cannot connect to server. Is the backend running on port 8001?');
-          setRunning(false);
-        }
-      };
-    },
-    [setSelectedRun, running, error],
-  );
+    ws.onclose = (event) => {
+      console.log(`[NewRun WS] WebSocket closed: code=${event.code}, reason=${event.reason}`);
+      const wasConnected = wsConnected.current;
+      wsRef.current = null;
+      wsConnected.current = false;
+      if (running && wasConnected && !runCompleted.current && !error) {
+        setError('Live connection closed before the run completed.');
+        setRunning(false);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error('[NewRun WS] WebSocket error:', err);
+      // Only surface error if we never connected (server unreachable)
+      if (!wsConnected.current) {
+        setError('Cannot connect to server. Is the backend running on port 8001?');
+        setRunning(false);
+      }
+    };
+  }, [setSelectedRun, running, error]);
 
   const handleStart = async () => {
     setRunning(true);
@@ -109,6 +110,8 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
 
     try {
       console.log('[NewRun] Starting run flow...');
+
+      // Health check first
       console.log('[NewRun] Checking server health...');
       const healthRes = await fetch('/api/models/status');
       if (!healthRes.ok) {
@@ -126,27 +129,31 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
         return;
       }
 
+      // Generate run_id client-side — we'll use THIS same ID for both WebSocket and POST
       const rid = `run_${Date.now()}`;
       setRunId(rid);
       console.log(`[NewRun] Generated run_id: ${rid}`);
 
+      // Step 1: Connect WebSocket FIRST (before experiment starts)
       console.log(`[NewRun] Connecting WebSocket to /ws/run/${rid}...`);
       connectWebSocket(rid);
 
+      // Wait for WebSocket to open before starting experiment
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('WebSocket timeout')), 5000);
         const checkWs = setInterval(() => {
           if (wsConnected.current) {
             clearTimeout(timeout);
             clearInterval(checkWs);
-            console.log('[NewRun] WebSocket connected');
+            console.log('[NewRun] ✓ WebSocket connected');
             resolve();
           }
         }, 50);
       });
 
+      // Step 2: Start experiment, passing the SAME run_id for WebSocket routing
       const params = new URLSearchParams({
-        run_id: rid,
+        run_id: rid,  // CRITICAL: pass client run_id so server routes WS messages correctly
         max_attempts: String(maxAttempts),
         ...(scenarioId ? { scenario_id: scenarioId } : {}),
       });
@@ -165,13 +172,14 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
       const data = await res.json();
       console.log('[NewRun] POST response:', data);
 
+      // Verify server used our run_id
       if (data.run_id && data.run_id !== rid) {
         console.warn(`[NewRun] Server returned different run_id: ${data.run_id} (expected ${rid}). Reconnecting WebSocket...`);
         setRunId(data.run_id);
         if (wsRef.current) wsRef.current.close();
         connectWebSocket(data.run_id);
       } else {
-        console.log(`[NewRun] Server confirmed run_id: ${data.run_id}`);
+        console.log(`[NewRun] ✓ Server confirmed run_id: ${data.run_id}`);
       }
     } catch (e) {
       console.error('[NewRun] Exception during start:', e);
@@ -206,23 +214,25 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
   const progress = maxAttempts > 0 ? (currentAttempt / maxAttempts) * 100 : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-800 dark:bg-stone-900">
-        <div className="border-b border-stone-200 px-6 py-4 dark:border-stone-800">
-          <h2 className="font-display text-lg font-semibold text-stone-900 dark:text-stone-100">
-            {running ? 'Running Experiment…' : 'New Experiment Run'}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-200">
+          <h2 className="text-lg font-bold text-slate-900">
+            {running ? 'Running Experiment...' : 'New Experiment Run'}
           </h2>
-          <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+          <p className="text-sm text-slate-500 mt-1">
             {running
-              ? 'Models are pre-loaded — run will start immediately.'
-              : 'Start a new AutoRed attack scenario with pre-loaded models.'}
+              ? 'Models are pre-loaded — run will start immediately'
+              : 'Start a new AutoRed attack scenario with pre-loaded models'}
           </p>
         </div>
 
+        {/* Body */}
         {!running ? (
-          <div className="space-y-4 px-6 py-5">
+          <div className="px-6 py-5 space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Max Attempts
               </label>
               <input
@@ -231,69 +241,95 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
                 max={100}
                 value={maxAttempts}
                 onChange={(e) => setMaxAttempts(Number(e.target.value))}
-                className="input w-full"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
-                Scenario ID <span className="text-stone-400">(optional, random if empty)</span>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Scenario ID <span className="text-slate-400">(optional, random if empty)</span>
               </label>
               <input
                 type="text"
                 value={scenarioId}
                 onChange={(e) => setScenarioId(e.target.value)}
                 placeholder="e.g., 89021"
-                className="input w-full"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
         ) : (
           <div className="px-6 py-8">
+            {/* Progress bar */}
             <div className="mb-4">
-              <div className="mb-1 flex items-center justify-between text-sm text-stone-600 dark:text-stone-400">
-                <span>
-                  Attempt {currentAttempt} / {maxAttempts}
-                </span>
+              <div className="flex items-center justify-between text-sm text-slate-600 mb-1">
+                <span>Attempt {currentAttempt} / {maxAttempts}</span>
                 <span>{Math.round(progress)}%</span>
               </div>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+              <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                 <div
-                  className="h-2.5 rounded-full bg-teal-600 transition-all duration-300 dark:bg-teal-500"
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
                   style={{ width: `${Math.min(progress, 100)}%` }}
                 />
               </div>
             </div>
 
-            {runId && <p className="mb-4 text-center font-mono text-xs text-stone-500 dark:text-stone-400">Run ID: {runId}</p>}
+            {runId && (
+              <p className="text-xs text-slate-500 text-center font-mono mb-4">
+                Run ID: {runId}
+              </p>
+            )}
 
             {error && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
-                <p className="text-sm text-rose-700 dark:text-rose-300">{error}</p>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-700">{error}</p>
               </div>
             )}
 
             {success !== null && !error && (
-              <div className={`rounded-lg p-4 text-center ${success ? 'border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20' : 'border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-800/50'}`}>
-                <p className={`text-lg font-bold ${success ? 'text-emerald-700 dark:text-emerald-400' : 'text-stone-700 dark:text-stone-300'}`}>
-                  {success ? 'Success — Access Code Extracted' : 'Failed — Max Attempts Reached'}
+              <div className={`rounded-lg p-4 text-center ${success ? 'bg-green-50' : 'bg-slate-50'}`}>
+                <p className={`text-lg font-bold ${success ? 'text-green-700' : 'text-slate-700'}`}>
+                  {success ? '✓ Success — Access Code Extracted' : '✗ Failed — Max Attempts Reached'}
                 </p>
-                <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">Total attempts: {totalAttempts}</p>
+                <p className="text-sm text-slate-500 mt-1">
+                  Total attempts: {totalAttempts}
+                </p>
               </div>
             )}
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-3 border-t border-stone-200 px-6 py-4 dark:border-stone-800">
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3">
           {!running ? (
             <>
-              <button onClick={onClose} className="btn-default">Cancel</button>
-              <button onClick={handleStart} className="btn-primary">Start Run</button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleStart}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Start Run
+              </button>
             </>
           ) : (
             <>
-              <button onClick={handleCancel} className="btn-danger">Cancel</button>
+              <button
+                onClick={handleCancel}
+                className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
               {(success !== null || error) && (
-                <button onClick={handleDone} className="btn-primary">{success ? 'View Results' : 'Done'}</button>
+                <button
+                  onClick={handleDone}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {success ? 'View Results' : 'Done'}
+                </button>
               )}
             </>
           )}

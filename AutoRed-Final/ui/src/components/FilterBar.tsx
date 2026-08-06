@@ -14,20 +14,19 @@ export default function FilterBar({ runs, onFilter }: FilterBarProps) {
     let filtered = [...runs];
 
     if (showOnly === 'success') {
-      filtered = filtered.filter((r) => r.success);
+      filtered = filtered.filter(r => r.success);
     } else if (showOnly === 'failure') {
-      filtered = filtered.filter((r) => !r.success);
+      filtered = filtered.filter(r => !r.success);
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (r) =>
-          r.run_id.toLowerCase().includes(q) ||
-          r.scenario_id.toLowerCase().includes(q) ||
-          r.access_code.toLowerCase().includes(q) ||
-          r.generator.toLowerCase().includes(q) ||
-          r.victim.toLowerCase().includes(q),
+      filtered = filtered.filter(r =>
+        r.run_id.toLowerCase().includes(q) ||
+        r.scenario_id.toLowerCase().includes(q) ||
+        r.access_code.toLowerCase().includes(q) ||
+        r.generator.toLowerCase().includes(q) ||
+        r.victim.toLowerCase().includes(q)
       );
     }
 
@@ -35,16 +34,17 @@ export default function FilterBar({ runs, onFilter }: FilterBarProps) {
   }, [runs, searchQuery, showOnly, onFilter]);
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-white p-1 dark:border-stone-800 dark:bg-stone-900">
+    <div className="flex items-center gap-3 flex-wrap">
+      {/* Success filter */}
+      <div className="flex items-center gap-1 bg-white rounded-lg border border-slate-200 p-1">
         {(['all', 'success', 'failure'] as const).map((opt) => (
           <button
             key={opt}
             onClick={() => setShowOnly(opt)}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
               showOnly === opt
-                ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
-                : 'text-stone-600 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800'
+                ? 'bg-slate-900 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             {opt.charAt(0).toUpperCase() + opt.slice(1)}
@@ -52,17 +52,21 @@ export default function FilterBar({ runs, onFilter }: FilterBarProps) {
         ))}
       </div>
 
-      <div className="min-w-[200px] flex-1">
+      {/* Search */}
+      <div className="flex-1 min-w-[200px]">
         <input
           type="text"
           placeholder="Search runs (ID, access code, model...)"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="input w-full"
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
 
-      <span className="text-xs text-stone-500 dark:text-stone-400">Filter run history</span>
+      {/* Count */}
+      <span className="text-xs text-slate-500">
+        Filter run history
+      </span>
     </div>
   );
 }

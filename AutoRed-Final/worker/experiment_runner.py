@@ -287,10 +287,16 @@ def run_experiment(scenario_id: Optional[str] = None,
         raw_dataset_entry=raw_dataset_entry,
     )
 
-    # Save to results directory
-    results_dir = Path("results")
-    results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"{run_json['experiment']['run_id']}.json"
+    from experiment.results_layout import (
+        resolve_model_id, parse_output_dir, runs_root, single_run_filename,
+    )
+    model_id = resolve_model_id(None, model_info["victim"]["name"])
+    _, chars = parse_output_dir(None, "single")
+    root = runs_root(None, "single", model_id, chars)
+    # `success` is already computed earlier in this function
+    # (True iff ground_truth_found or extractor_success or verification_success).
+    stage_dir = root / "runs" / ("success" if success else "failed")
+    json_path = stage_dir / single_run_filename(scenario_id)
     with open(json_path, "w") as f:
         json.dump(run_json, f, indent=2, default=str)
     print(f"\n💾 Run JSON saved to: {json_path}")

@@ -141,25 +141,15 @@ def load_model(base_model: str, adapter: str, local_files_only: bool):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     import torch
 
-    # Support testing either a PEFT adapter (needs base model) or a pre-merged
-    # full model directory (no adapter_config.json).
-    adapter_path = Path(adapter)
-    is_merged = not (adapter_path / "adapter_config.json").exists()
-    model_path = adapter if is_merged else base_model
-    print(f"[LOAD] Loading {'merged full model' if is_merged else 'base model + adapter'}: {model_path}")
-
     model = AutoModelForCausalLM.from_pretrained(
-        model_path,
+        base_model,
         torch_dtype=torch.bfloat16,
         device_map="auto",
         local_files_only=local_files_only,
         trust_remote_code=True,
     )
-    if not is_merged:
-        model = PeftModel.from_pretrained(model, adapter, local_files_only=local_files_only)
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path, local_files_only=local_files_only, trust_remote_code=True
-    )
+    model = PeftModel.from_pretrained(model, adapter, local_files_only=local_files_only)
+    tokenizer = AutoTokenizer.from_pretrained(base_model, local_files_only=local_files_only, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id

@@ -52,14 +52,14 @@ export default function ResizeHandle({
       title={`${label}. Drag to resize; double-click to reset.`}
     >
       <span
-        className={`absolute rounded-full bg-stone-300 transition-all group-hover:bg-teal-500 group-focus:bg-teal-500 dark:bg-stone-700 dark:group-hover:bg-teal-500 ${
+        className={`absolute rounded-full bg-slate-300 transition-all group-hover:bg-blue-500 group-focus:bg-blue-500 ${
           vertical
             ? 'inset-y-0 left-1/2 w-px -translate-x-1/2 group-hover:w-1 group-focus:w-1'
             : 'inset-x-0 top-1/2 h-px -translate-y-1/2 group-hover:h-1 group-focus:h-1'
         }`}
       />
       <span
-        className={`absolute rounded-full border border-stone-300 bg-white shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100 dark:border-stone-700 dark:bg-stone-800 ${
+        className={`absolute rounded-full border border-slate-300 bg-white shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100 ${
           vertical
             ? 'left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2'
             : 'left-1/2 top-1/2 h-2 w-10 -translate-x-1/2 -translate-y-1/2'

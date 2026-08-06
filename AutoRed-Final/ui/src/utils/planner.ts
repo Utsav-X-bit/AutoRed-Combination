@@ -1,7 +1,5 @@
 import type { AutoRedRun, Attempt, PlannerStateSnapshot, StrategyStat } from '../types/autored';
 
-export type PlanFallback = Partial<Pick<ParsedPlan, 'strategy' | 'primitives' | 'style' | 'expected_access_type' | 'retry_policy' | 'confidence' | 'failure_reason'>>;
-
 export interface ParsedPlan {
   strategy: string;
   primitives: string[];
@@ -17,48 +15,26 @@ const tag = (text: string, name: string) => {
   return match ? match[1].trim() : '';
 };
 
-export function parsePlanText(
-  planRaw: string | undefined | null,
-  fallback?: PlanFallback,
-): ParsedPlan | null {
-  const fb = fallback || {};
-
-  // Legacy runs have neither plan XML nor structured planner fields.
-  const hasPlanXml = Boolean(planRaw);
-  const hasFallback = Boolean(
-    fb.strategy || fb.style || fb.expected_access_type || fb.retry_policy || (fb.primitives && fb.primitives.length),
-  );
-  if (!hasPlanXml && !hasFallback) return null;
-
-  const primitiveBlock = hasPlanXml ? tag(planRaw!, 'primitive_sequence') : '';
-  const primitivesFromXml = Array.from(primitiveBlock.matchAll(/<step>(.*?)<\/step>/gi))
+export function parsePlanText(planRaw: string | undefined | null): ParsedPlan | null {
+  if (!planRaw) return null;
+  const primitiveBlock = tag(planRaw, 'primitive_sequence');
+  const primitives = Array.from(primitiveBlock.matchAll(/<step>(.*?)<\/step>/gi))
     .map((match) => match[1].trim())
     .filter(Boolean);
 
-  const confidenceRaw = hasPlanXml ? tag(planRaw!, 'confidence') : '';
-  const confidenceFromXml = confidenceRaw ? Number(confidenceRaw) : NaN;
+  const confidenceRaw = tag(planRaw, 'confidence');
+  const confidence = Number(confidenceRaw);
 
   return {
-    strategy: (hasPlanXml ? tag(planRaw!, 'strategy') : '') || fb.strategy || 'unknown',
-    primitives: primitivesFromXml.length
-      ? primitivesFromXml
-      : (fb.primitives && fb.primitives.length)
-        ? fb.primitives
-        : [],
-    style: (hasPlanXml ? tag(planRaw!, 'style') : '') || fb.style || 'unknown',
-    expected_access_type:
-      (hasPlanXml
-        ? tag(planRaw!, 'expected_access_type') || tag(planRaw!, 'expected_access_code_type')
-        : '')
-      || fb.expected_access_type
+    strategy: tag(planRaw, 'strategy') || 'unknown',
+    primitives: primitives.length ? primitives : [],
+    style: tag(planRaw, 'style') || 'unknown',
+    expected_access_type: tag(planRaw, 'expected_access_type')
+      || tag(planRaw, 'expected_access_code_type')
       || 'UNKNOWN',
-    retry_policy: (hasPlanXml ? tag(planRaw!, 'retry_policy') : '') || fb.retry_policy || 'explore',
-    confidence: Number.isFinite(confidenceFromXml)
-      ? confidenceFromXml
-      : fb.confidence !== undefined
-        ? fb.confidence
-        : -1,
-    failure_reason: (hasPlanXml ? tag(planRaw!, 'failure_reason') : '') || fb.failure_reason || 'none',
+    retry_policy: tag(planRaw, 'retry_policy') || 'explore',
+    confidence: Number.isFinite(confidence) ? confidence : -1,
+    failure_reason: tag(planRaw, 'failure_reason') || 'none',
   };
 }
 
@@ -105,7 +81,7 @@ export function attemptTimeline(run: AutoRedRun) {
     attempt_number: attempt.attempt_number,
     strategy: attempt.generator.strategy,
     plan_raw: attempt.generator.plan_raw ?? '',
-    parsed_plan: parsePlanText(attempt.generator.plan_raw, attempt.generator),
+    parsed_plan: parsePlanText(attempt.generator.plan_raw),
     time_ms: attempt.attempt_time_ms,
     timestamp: attempt.timestamp,
     success: attempt.ground_truth_found || attempt.extractor_match || attempt.verification.success,

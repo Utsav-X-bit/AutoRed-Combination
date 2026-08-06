@@ -1,16 +1,7 @@
 import { useRunStore } from '../store/runStore';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, AreaChart, Area,
 } from 'recharts';
 
 export default function TokenAnalyticsTab() {
@@ -19,100 +10,99 @@ export default function TokenAnalyticsTab() {
 
   const attempts = selectedRun.attempts;
 
-  const tokenData = attempts.map((a) => ({
+  // Token data per attempt
+  const tokenData = attempts.map(a => ({
     attempt: a.attempt_number,
     inputTokens: a.generator.input_tokens,
     outputTokens: a.generator.output_tokens,
     totalTokens: a.generator.input_tokens + a.generator.output_tokens,
   }));
 
-  let cumInput = 0;
-  let cumOutput = 0;
-  const cumulativeData = tokenData.map((d) => {
+  // Cumulative tokens
+  let cumInput = 0, cumOutput = 0;
+  const cumulativeData = tokenData.map(d => {
     cumInput += d.inputTokens;
     cumOutput += d.outputTokens;
     return { attempt: d.attempt, cumInput, cumOutput };
   });
 
+  // Total stats
   const totalInput = tokenData.reduce((s, d) => s + d.inputTokens, 0);
   const totalOutput = tokenData.reduce((s, d) => s + d.outputTokens, 0);
   const avgInput = Math.round(totalInput / attempts.length);
   const avgOutput = Math.round(totalOutput / attempts.length);
 
-  const tooltipStyle = {
-    backgroundColor: 'var(--elevated)',
-    borderColor: 'var(--border)',
-    borderRadius: '0.5rem',
-  };
-
-  const gridColor = 'currentColor';
-  const tickColor = 'currentColor';
-
   return (
-    <div className="space-y-4 pb-8">
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Total Input" value={totalInput.toLocaleString()} accent="teal" />
-        <StatCard label="Total Output" value={totalOutput.toLocaleString()} accent="indigo" />
-        <StatCard label="Avg Input" value={avgInput.toLocaleString()} accent="teal" />
-        <StatCard label="Avg Output" value={avgOutput.toLocaleString()} accent="indigo" />
-      </section>
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+          <p className="text-xs text-slate-500">Total Input</p>
+          <p className="text-xl font-bold text-blue-600">{totalInput.toLocaleString()}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+          <p className="text-xs text-slate-500">Total Output</p>
+          <p className="text-xl font-bold text-purple-600">{totalOutput.toLocaleString()}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+          <p className="text-xs text-slate-500">Avg Input</p>
+          <p className="text-xl font-bold text-blue-600">{avgInput.toLocaleString()}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+          <p className="text-xs text-slate-500">Avg Output</p>
+          <p className="text-xl font-bold text-purple-600">{avgOutput.toLocaleString()}</p>
+        </div>
+      </div>
 
-      <ChartCard title="Tokens Per Attempt">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={tokenData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} className="text-stone-200 dark:text-stone-800" />
-            <XAxis dataKey="attempt" tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <YAxis tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: 'currentColor' }} />
-            <Bar dataKey="inputTokens" fill="#0d9488" name="Input" />
-            <Bar dataKey="outputTokens" fill="#6366f1" name="Output" />
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      {/* Per-Attempt Tokens */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-bold text-slate-900 mb-3">Tokens Per Attempt</h3>
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={tokenData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="attempt" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="inputTokens" fill="#3b82f6" name="Input" />
+              <Bar dataKey="outputTokens" fill="#8b5cf6" name="Output" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
-      <ChartCard title="Cumulative Tokens">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={cumulativeData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} className="text-stone-200 dark:text-stone-800" />
-            <XAxis dataKey="attempt" tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <YAxis tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: 'currentColor' }} />
-            <Area type="monotone" dataKey="cumInput" stackId="1" stroke="#0d9488" fill="#0d9488" name="Input" />
-            <Area type="monotone" dataKey="cumOutput" stackId="2" stroke="#6366f1" fill="#6366f1" name="Output" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      {/* Cumulative Tokens */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-bold text-slate-900 mb-3">Cumulative Tokens</h3>
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={cumulativeData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="attempt" />
+              <YAxis />
+              <Tooltip />
+              <Area type="monotone" dataKey="cumInput" stackId="1" stroke="#3b82f6" fill="#3b82f6" name="Input" />
+              <Area type="monotone" dataKey="cumOutput" stackId="2" stroke="#8b5cf6" fill="#8b5cf6" name="Output" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
-      <ChartCard title="Token Trend">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={tokenData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} className="text-stone-200 dark:text-stone-800" />
-            <XAxis dataKey="attempt" tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <YAxis tick={{ fontSize: 12, fill: tickColor }} className="text-stone-600 dark:text-stone-400" />
-            <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: 'currentColor' }} />
-            <Line type="monotone" dataKey="totalTokens" stroke="#f59e0b" strokeWidth={2} name="Total" />
-          </LineChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      {/* Token Trend */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-bold text-slate-900 mb-3">Token Trend</h3>
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={tokenData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="attempt" />
+              <YAxis />
+              <Tooltip />
+              <Line type="monotone" dataKey="totalTokens" stroke="#f59e0b" strokeWidth={2} name="Total" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
-  );
-}
-
-function StatCard({ label, value, accent }: { label: string; value: string; accent: 'teal' | 'indigo' }) {
-  const valueClass = accent === 'teal' ? 'text-teal-700 dark:text-teal-400' : 'text-indigo-700 dark:text-indigo-400';
-  return (
-    <div className="rounded-xl border border-stone-200 bg-white p-3 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">{label}</p>
-      <p className={`font-display text-xl font-bold ${valueClass}`}>{value}</p>
-    </div>
-  );
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="h-80 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-900">
-      <h3 className="mb-3 font-display text-sm font-semibold text-stone-900 dark:text-stone-100">{title}</h3>
-      <div className="h-56">{children}</div>
-    </section>
   );
 }
