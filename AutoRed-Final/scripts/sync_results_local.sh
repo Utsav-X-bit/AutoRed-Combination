@@ -37,7 +37,17 @@ AUTORED_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"           # AutoRed-Final/
 RESULTS_DIR="${AUTORED_DIR}/results"                  # new-layout output tree
 REMOTE="gdrive"
 REMOTE_RESULTS_DIR="AutoRed-Combination/results"      # gdrive:<this>/results_*.zip
+# Pin the rclone root to a *shared* Google Drive folder by ID so both you and a
+# coworker (each using their own 'gdrive' account) pull from the SAME shared
+# folder regardless of whose Drive root it sits under. The folder ID is
+# constant; the path (AutoRed-Combination/results) is resolved relative to it.
+# Override per-invocation with --root-folder-id, or change the default here.
+DRIVE_ROOT_FOLDER_ID="14TP-ANowJkqYMLJsPFcdQz_ZVB4wPytz"
 TMP_BASE="${TMPDIR:-/tmp}"
+
+# Flags appended to EVERY rclone call (kept as an array to survive --dry-run
+# previews and to stay quoting-safe). Empty if no root-folder pin is set.
+RCLONE_ROOT_FLAGS=()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -64,12 +74,18 @@ OPTIONS:
   --dry-run       Show what would happen (which zip, merge/replace, paths)
                   without writing to results/.
   --remote NAME   rclone remote to use (default: gdrive).
-  --remote-dir P  Remote directory under the remote (default: AutoRed-Combination/results).
+  --remote-dir P  Remote directory under the pinned folder (default: AutoRed-Combination/results).
+  --root-folder-id  Google Drive folder ID to pin as rclone's root. Defaults to
+                    a SHARED folder so you and a coworker (each on your own
+                    'gdrive' account) pull from the same place. Pass a different
+                    ID to target another folder; pass '' (empty) to use the
+                    remote's own Drive root instead.
   --help, -h      Show this help.
 
 ENV:
   Results dir:    AutoRed-Final/results/  (new layout: benchmark/<model>/<chars>/...)
   Remote path:    gdrive:AutoRed-Combination/results/
+                  (resolved relative to the pinned shared folder — see --root-folder-id)
   Merge tool:     rsync --update (newer mtime wins on collision)
 
 NOTES:
@@ -80,12 +96,13 @@ NOTES:
   - Only results/ is affected by merge/replace. The archive's results_bak/
     (if present in the zip) is extracted to results_bak/ under the same
     merge/replace policy.
+  - Both you and your coworker must have access to the pinned shared folder.
 HELP
 }
 
 list_remote_archives() {
   # Print remote results_*.zip filenames, one per line, sorted (oldest→newest).
-  rclone lsf "${REMOTE}:${REMOTE_RESULTS_DIR}/" 2>/dev/null \
+  rclone lsf "${REMOTE}:${REMOTE_RESULTS_DIR}/" "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null \
     | grep -E '^results_[0-9]+\.zip$' || true
 }
 
@@ -108,13 +125,22 @@ while [[ $# -gt 0 ]]; do
     --merge)      MODE="merge"; shift ;;
     --list)       LIST_ONLY=1; shift ;;
     --dry-run)    DRY_RUN=1; shift ;;
-    --remote)     REMOTE="$2"; shift 2 ;;
-    --remote-dir) REMOTE_RESULTS_DIR="$2"; shift 2 ;;
-    --help|-h)    print_help; exit 0 ;;
-    --*)          echo "error: unknown option: $1" >&2; echo "try --help" >&2; exit 2 ;;
-    *)            ZIP_ARG="$1"; shift ;;
+    --remote)        REMOTE="$2"; shift 2 ;;
+    --remote-dir)    REMOTE_RESULTS_DIR="$2"; shift 2 ;;
+    --root-folder-id) DRIVE_ROOT_FOLDER_ID="$2"; shift 2 ;;
+    --help|-h)       print_help; exit 0 ;;
+    --*)             echo "error: unknown option: $1" >&2; echo "try --help" >&2; exit 2 ;;
+    *)               ZIP_ARG="$1"; shift ;;
   esac
 done
+
+# Build the root-pinning flag array after arg parsing so an explicit
+# --root-folder-id '' (empty) disables pinning (uses the remote's own root).
+if [[ -n "$DRIVE_ROOT_FOLDER_ID" ]]; then
+  RCLONE_ROOT_FLAGS=(--drive-root-folder-id "$DRIVE_ROOT_FOLDER_ID")
+else
+  RCLONE_ROOT_FLAGS=()
+fi
 
 if ! command -v rclone >/dev/null 2>&1; then
   echo "error: rclone not found. Install it and run 'rclone config'." >&2; exit 1
@@ -131,6 +157,9 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$LIST_ONLY" -eq 1 ]]; then
   echo "Archives in ${REMOTE}:${REMOTE_RESULTS_DIR}/"
+  if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
+    echo "(pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})"
+  fi
   archives="$(list_remote_archives)"
   if [[ -z "$archives" ]]; then
     echo "  (none found)"
@@ -154,6 +183,9 @@ else
   ZIP_NAME="$(latest_remote_zip)"
   if [[ -z "$ZIP_NAME" ]]; then
     echo "error: no results_*.zip archives found in ${REMOTE}:${REMOTE_RESULTS_DIR}/" >&2
+    if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
+      echo "       (pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})" >&2
+    fi
     echo "       run ./sync_results_drive.sh first to push one." >&2
     exit 1
   fi
@@ -162,6 +194,9 @@ fi
 
 REMOTE_PATH="${REMOTE}:${REMOTE_RESULTS_DIR}/${ZIP_NAME}"
 echo "Pulling:  $REMOTE_PATH"
+if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
+  echo "         (pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})"
+fi
 
 # ---------------------------------------------------------------------------
 # Dry-run preview
@@ -170,6 +205,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[dry-run] mode:     $MODE"
   echo "[dry-run] target:   $RESULTS_DIR"
   echo "[dry-run] would:    download $ZIP_NAME → temp, unzip, ${MODE} into results/"
+  echo "[dry-run] rclone:   rclone copy \"$REMOTE_PATH\" <tmp>/ --progress ${RCLONE_ROOT_FLAGS[*]}"
   echo "[dry-run] no changes made."
   exit 0
 fi
@@ -182,7 +218,7 @@ trap 'rm -rf "$WORKDIR"' EXIT
 ZIP_LOCAL="${WORKDIR}/${ZIP_NAME}"
 
 echo "[1/4] Downloading ${ZIP_NAME} → ${ZIP_LOCAL}"
-if ! rclone copy "$REMOTE_PATH" "$WORKDIR/" --progress; then
+if ! rclone copy "$REMOTE_PATH" "$WORKDIR/" --progress "${RCLONE_ROOT_FLAGS[@]}"; then
   echo "error: rclone download failed for $REMOTE_PATH" >&2
   exit 1
 fi
