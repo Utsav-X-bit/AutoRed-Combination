@@ -29,7 +29,9 @@
 #   --dataset-path PATH          Defense dataset jsonl
 #   --dataset-size N             Scenarios to sample (default 1000)
 #   --attempts N                 Max attack attempts per scenario (default 20)
-#   --gpu-memory-utilization F   vLLM GPU mem fraction (default 0.43)
+#   --gpu-memory-utilization F   victim vLLM GPU mem fraction (default 0.50)
+#   --shared-gpu-memory-utilization F  shared planner/generator vLLM GPU mem
+#                                fraction (default 0.48)
 #   --start-idx N                Zero-based start index (ordered slice);
 #                                omit for random sampling
 #   --seed N                     Seed for sampling / mutation fallback (default 7)
@@ -105,7 +107,17 @@ VICTIM_MODEL_ID="meta-llama/Meta-Llama-3-8B-Instruct"
 DATASET_PATH="data/TensorTrust_subsets/subset_8_ac30_all_alpha_direct_or_deterministic_or_indirect.jsonl"
 DATASET_SIZE=1000
 ATTEMPTS=20
-GPU_MEMORY_UTILIZATION=0.43
+# GPU memory split between the two co-resident 8B vLLM models on each GPU.
+# The victim (llama_model) serves BOTH chat_with_llama_messages_batch AND
+# extract_batch — the two highest-volume LLM calls in the hot loop — so it gets
+# the larger share. The shared LoRA base (planner+generator) only sees
+# ≤batch_size prompts per round and needs far less KV-cache headroom.
+# Restored to the proven-fast config (victim 0.50 + shared 0.48 = 0.98 total);
+# the prior 0.43 / 0.55 split starved the victim's KV cache (1.36× concurrency,
+# 51 RECOMPUTE preemptions) and over-provisioned the shared model (16.27×
+# concurrency), inverting the load profile and ~2.4× wall-clock regress.
+GPU_MEMORY_UTILIZATION=0.50
+SHARED_GPU_MEMORY_UTILIZATION=0.48
 START_IDX=""
 SEED=7
 MUTATION_FALLBACK=0
@@ -139,7 +151,9 @@ OPTIONS (all optional; defaults shown)
   --dataset-path PATH          Defense dataset jsonl
   --dataset-size N             Scenarios to sample (default 1000)
   --attempts N                 Max attack attempts per scenario (default 20)
-  --gpu-memory-utilization F   vLLM GPU mem fraction (default 0.43)
+  --gpu-memory-utilization F   victim vLLM GPU mem fraction (default 0.50)
+  --shared-gpu-memory-utilization F  shared planner/generator vLLM GPU mem
+                               fraction (default 0.48)
   --start-idx N                Zero-based start index (ordered slice);
                                omit for random sampling
   --seed N                     Seed for sampling / mutation fallback (default 7)
@@ -177,7 +191,8 @@ while [[ $# -gt 0 ]]; do
     --dataset-path)            DATASET_PATH="$2"; shift 2 ;;
     --dataset-size)            DATASET_SIZE="$2"; shift 2 ;;
     --attempts)                ATTEMPTS="$2"; shift 2 ;;
-    --gpu-memory-utilization)  GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
+    --gpu-memory-utilization)   GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
+    --shared-gpu-memory-utilization) SHARED_GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
     --start-idx)               START_IDX="$2"; shift 2 ;;
     --seed)                    SEED="$2"; shift 2 ;;
     --mutation-fallback)       MUTATION_FALLBACK=1; shift ;;
@@ -249,7 +264,7 @@ echo "Base Model   : $BASE_GENERATOR_PATH"
 echo "Victim       : $VICTIM_MODEL_ID"
 echo "Dataset      : $DATASET_PATH (size $DATASET_SIZE)"
 echo "Attempts     : $ATTEMPTS"
-echo "GPU mem util : $GPU_MEMORY_UTILIZATION"
+echo "GPU mem util : victim=$GPU_MEMORY_UTILIZATION shared=$SHARED_GPU_MEMORY_UTILIZATION"
 echo "Start idx    : ${START_IDX:-<random sampling>}"
 echo "Seed         : $SEED"
 if [[ "$MUTATION_FALLBACK" -eq 1 ]]; then
@@ -295,6 +310,7 @@ for WORKER_ID in $(seq 0 $((NUM_GPUS - 1))); do
         --generator-path "$GENERATOR_PATH"
         --attempts "$ATTEMPTS"
         --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
+        --shared-gpu-memory-utilization "$SHARED_GPU_MEMORY_UTILIZATION"
         --seed "$SEED"
         --max-fallback-rounds "$MAX_FALLBACK_ROUNDS"
     )

@@ -323,17 +323,25 @@ _TRUST_REMOTE_CODE = os.environ.get("AUTORED_TRUST_REMOTE_CODE", "1") == "1"
 # for Mistral-family models; defaults to "auto".
 _TOKENIZER_MODE = os.environ.get("AUTORED_TOKENIZER_MODE", "auto")
 
-# Fraction of GPU memory vLLM will reserve for the victim LLM. Lower this if
-# loading the DistilBERT judge/access-code predictor causes OOM.
+# Fraction of GPU memory vLLM will reserve for the victim LLM. The victim
+# (llama_model) serves BOTH chat_with_llama_messages_batch AND extract_batch —
+# the two highest-volume LLM calls in the hot loop — and re-processes a growing
+# multi-turn history across 20 attempts/scenario, so it gets the larger share
+# of the GPU. Lower this if loading the DistilBERT judge/access-code predictor
+# causes OOM.
 _GPU_MEMORY_UTILIZATION = float(
-    os.environ.get("AUTORED_GPU_MEMORY_UTILIZATION", "0.45")
+    os.environ.get("AUTORED_GPU_MEMORY_UTILIZATION", "0.50")
 )
 
-# Fraction of GPU memory for the shared planner/generator vLLM instance.
-# Defaults higher than the victim because planner/generator prompts are short
-# and benefit from more KV cache for large batches.
+# Fraction of GPU memory for the shared planner/generator vLLM instance. This
+# model only sees short planner/generator prompts (≤256 tokens) in ≤batch_size
+# batches and has enable_prefix_caching=True, so it needs far less KV-cache
+# headroom than the victim. The victim/shared split (0.50/0.48 = 0.98 total)
+# matches the proven-fast config; the prior 0.45/0.55 split inverted the load
+# profile (starved the victim's KV cache, over-provisioned the shared model)
+# and regressed wall-clock ~2.4×.
 _SHARED_GPU_MEMORY_UTILIZATION = float(
-    os.environ.get("AUTORED_SHARED_GPU_MEMORY_UTILIZATION", "0.55")
+    os.environ.get("AUTORED_SHARED_GPU_MEMORY_UTILIZATION", "0.48")
 )
 
 # Victim max sequence length. Lowering this shrinks the vLLM KV cache and is
