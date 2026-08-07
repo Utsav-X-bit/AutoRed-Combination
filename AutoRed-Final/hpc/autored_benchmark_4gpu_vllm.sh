@@ -112,12 +112,15 @@ ATTEMPTS=20
 # extract_batch — the two highest-volume LLM calls in the hot loop — so it gets
 # the larger share. The shared LoRA base (planner+generator) only sees
 # ≤batch_size prompts per round and needs far less KV-cache headroom.
-# Restored to the proven-fast config (victim 0.50 + shared 0.48 = 0.98 total);
-# the prior 0.43 / 0.55 split starved the victim's KV cache (1.36× concurrency,
-# 51 RECOMPUTE preemptions) and over-provisioned the shared model (16.27×
-# concurrency), inverting the load profile and ~2.4× wall-clock regress.
+# victim 0.50 + shared 0.44 = 0.94 total — deliberately under the prior 0.98 to
+# reserve ~1.5 GiB (0.04×39GiB) for NLLB-200-distilled-600M on the GPU. NLLB TL
+# moved off CPU (the dominant non-LLM cost in the fallback tail); it runs in
+# fp16 (~1.4 GiB incl. activations) in the freed slab instead of starving the
+# GPU with seconds/call CPU beam-search. AUTORED_TL_DEVICE=cpu reverts TL to
+# CPU if the slab is ever needed back. Do NOT raise shared above 0.44 while
+# mutation fallback is on — that would push NLLB back toward OOM.
 GPU_MEMORY_UTILIZATION=0.50
-SHARED_GPU_MEMORY_UTILIZATION=0.48
+SHARED_GPU_MEMORY_UTILIZATION=0.44
 START_IDX=""
 SEED=7
 MUTATION_FALLBACK=0

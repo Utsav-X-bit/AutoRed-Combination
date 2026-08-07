@@ -7,6 +7,7 @@ Each mutator takes a string and returns a mutated string.
 
 import random
 import re
+import os
 import codecs
 import base64
 import numpy as np
@@ -19,6 +20,49 @@ try:
     _NLTK_OK = True
 except ImportError:
     _NLTK_OK = False
+
+# ─── Torch / CUDA (for NLLB TL on GPU) ──────────────────────────────────────
+# Imported lazily but once at module load so _load_nllb/_tl can place NLLB on the
+# GPU when one is free. The GPUs are primarily owned by the two co-resident
+# vLLM 8B models (victim + shared LoRA), but NLLB-200-distilled-600M is tiny
+# (~1.2 GiB fp16) and runs under a small dedicated slab carved out of the
+# rebalanced shared LoRA footprint (0.48 -> 0.44 frees ~1.5 GiB). Putting NLLB
+# on the GPU turns ~seconds/call CPU beam-search into ~tens-of-ms GPU forwards,
+# which is the dominant cost in the mutation-fallback tail. Env-gated so a
+# CPU-only node (or an explicit opt-out) keeps the old CPU path.
+try:
+    import torch
+    _TORCH_OK = True
+except ImportError:
+    torch = None
+    _TORCH_OK = False
+
+def _nllb_device():
+    """Resolve the device for NLLB TL inference.
+
+    Honors AUTORED_TL_DEVICE=cpu to force CPU (e.g. when the GPU is fully
+    occupied by vLLM with no slab for NLLB). Defaults to cuda:0 when torch sees
+    a GPU, else cpu. We deliberately target device 0 — the benchmark pins both
+    vLLM models there and the rebalance reserves NLLB's slab on the same GPU.
+    """
+    if not _TORCH_OK:
+        return "cpu"
+    forced = os.environ.get("AUTORED_TL_DEVICE", "").strip().lower()
+    if forced in ("cpu", "0", "cuda:0", "gpu"):
+        if forced in ("0", "gpu"):
+            return "cuda:0"
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda:0"
+    return "cpu"
+
+
+class _NullCtx:
+    """No-op context manager for the torch-absent path (mirrors torch.no_grad)."""
+    def __enter__(self):
+        return None
+    def __exit__(self, *exc):
+        return False
 
 
 # ─── NLTK data download (run once) ─────────────────────────────────────────
@@ -285,32 +329,61 @@ _TL_WARNED = False  # log a TL failure reason at most once per process
 _NLLB_MODEL = None
 _NLLB_TOK = None
 _NLLB_TRIED = False
+_NLLB_DEVICE = "cpu"  # resolved at load time ("cuda:0" or "cpu")
 
 
 def _load_nllb():
     """Lazy-load the local NLLB-200-distilled-600M model + tokenizer (offline).
 
     Returns (model, tokenizer) or (None, None) if unavailable. Cached process-wide
-    so the ~30-60s load cost is paid once. Runs on CPU; the GPUs serve the victim.
+    so the ~30-60s load cost is paid once. Placed on the GPU in fp16 when one is
+    available (AUTORED_TL_DEVICE=cpu forces CPU): NLLB beam-search on CPU is the
+    dominant cost in the mutation-fallback tail (~seconds/call), and the 600M
+    model is ~1.2 GiB in fp16 — a small dedicated slab carved out of the
+    rebalanced shared LoRA footprint (0.48 -> 0.44 frees ~1.5 GiB on a 39 GiB
+    GPU). Falls back to fp32 CPU if the GPU move fails (OOM, CUDA init error).
     """
-    global _NLLB_MODEL, _NLLB_TOK, _NLLB_TRIED
+    global _NLLB_MODEL, _NLLB_TOK, _NLLB_TRIED, _NLLB_DEVICE
     if _NLLB_TRIED:
         return _NLLB_MODEL, _NLLB_TOK
     _NLLB_TRIED = True
     try:
-        import os
         # Respect offline env even on a login node — use cached weights only.
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
         name = "facebook/nllb-200-distilled-600M"
         _NLLB_TOK = AutoTokenizer.from_pretrained(name, local_files_only=True)
-        _NLLB_MODEL = AutoModelForSeq2SeqLM.from_pretrained(name, local_files_only=True)
+        device = _nllb_device()
+        # On GPU, load in fp16 to halve the footprint (~2.7 GiB fp32 -> ~1.4 GiB
+        # fp16 incl. activations); CPU stays fp32 (fp16 CPU kernels are slow and
+        # the CPU path is a fallback, not the hot path).
+        torch_dtype = None
+        if device != "cpu" and _TORCH_OK:
+            torch_dtype = torch.float16
+        _NLLB_MODEL = AutoModelForSeq2SeqLM.from_pretrained(
+            name, local_files_only=True, torch_dtype=torch_dtype
+        )
+        _NLLB_DEVICE = device
+        if device != "cpu":
+            try:
+                _NLLB_MODEL = _NLLB_MODEL.to(device)
+            except Exception as de:
+                # GPU placement failed (OOM, CUDA error) — reload on CPU as
+                # fp32 rather than no-op TL entirely.
+                print(f"  [TL] NLLB GPU placement failed ({de}); falling back to CPU fp32.")
+                _NLLB_MODEL = AutoModelForSeq2SeqLM.from_pretrained(
+                    name, local_files_only=True
+                )
+                _NLLB_DEVICE = "cpu"
         _NLLB_MODEL.eval()
-        print("  [TL] NLLB-200-distilled-600M loaded (offline, CPU) for TL mutator.")
+        where = _NLLB_DEVICE.upper() if _NLLB_DEVICE != "cpu" else "CPU"
+        dtype = "fp16" if _NLLB_DEVICE != "cpu" else "fp32"
+        print(f"  [TL] NLLB-200-distilled-600M loaded (offline, {where}, {dtype}) for TL mutator.")
     except Exception as e:
         _NLLB_MODEL = None
         _NLLB_TOK = None
+        _NLLB_DEVICE = "cpu"
         print(f"  [TL] NLLB unavailable ({e}); will try online backends or no-op.")
     return _NLLB_MODEL, _NLLB_TOK
 
@@ -343,11 +416,23 @@ def translation(text: str, target_lang: Optional[str] = None) -> str:
             return text  # unknown lang code -> no-op (shouldn't happen)
         try:
             enc = tok(text, return_tensors="pt")
+            # Move inputs to the model's device (cuda:0 when NLLB is on GPU;
+            # no-op on CPU). generate() stays on-device — only the decoded text
+            # comes back to Python. .to() on a BatchEncoding returns the same
+            # object with tensors replaced.
+            device = _NLLB_DEVICE
+            if device != "cpu" and _TORCH_OK:
+                enc = {k: v.to(device) for k, v in enc.items()}
             bos = tok.convert_tokens_to_ids(flores)
-            with __import__("torch").no_grad():
+            no_grad = torch.no_grad() if _TORCH_OK else _NullCtx()
+            with no_grad:
                 out = model.generate(
                     **enc, forced_bos_token_id=bos, max_length=200, num_beams=2
                 )
+            # batch_decode wants CPU tensors (it calls .tolist()); pull the small
+            # generated sequence off the device before decoding.
+            if device != "cpu" and _TORCH_OK and hasattr(out, "cpu"):
+                out = out.cpu()
             translated = tok.batch_decode(out, skip_special_tokens=True)[0]
             return translated if translated and translated.strip() else text
         except Exception as e:

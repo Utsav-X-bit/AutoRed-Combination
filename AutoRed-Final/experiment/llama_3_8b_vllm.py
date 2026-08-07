@@ -336,12 +336,14 @@ _GPU_MEMORY_UTILIZATION = float(
 # Fraction of GPU memory for the shared planner/generator vLLM instance. This
 # model only sees short planner/generator prompts (≤256 tokens) in ≤batch_size
 # batches and has enable_prefix_caching=True, so it needs far less KV-cache
-# headroom than the victim. The victim/shared split (0.50/0.48 = 0.98 total)
-# matches the proven-fast config; the prior 0.45/0.55 split inverted the load
-# profile (starved the victim's KV cache, over-provisioned the shared model)
-# and regressed wall-clock ~2.4×.
+# headroom than the victim. The victim/shared split (0.50/0.44 = 0.94 total)
+# intentionally reserves ~1.5 GiB (0.04× of a 39 GiB GPU) for NLLB-200-distilled-
+# 600M, which the TL mutator now runs in fp16 on the GPU (off the CPU where its
+# beam-search was the dominant non-LLM cost). AUTORED_TL_DEVICE=cpu reverts.
+# The prior 0.45/0.55 split inverted the load profile (starved the victim's KV
+# cache, over-provisioned the shared model) and regressed wall-clock ~2.4×.
 _SHARED_GPU_MEMORY_UTILIZATION = float(
-    os.environ.get("AUTORED_SHARED_GPU_MEMORY_UTILIZATION", "0.48")
+    os.environ.get("AUTORED_SHARED_GPU_MEMORY_UTILIZATION", "0.44")
 )
 
 # Victim max sequence length. Lowering this shrinks the vLLM KV cache and is
@@ -479,6 +481,16 @@ def _load_models():
         "tensor_parallel_size": 1,
         "max_model_len": _VICTIM_MAX_MODEL_LEN,
         "enforce_eager": _ENFORCE_EAGER,
+        # Prefix caching on the victim: the defense sandwich (system + opening
+        # + closing defenses) is a long shared prefix across every call within
+        # a scenario, and extract_batch re-sends prior turns. Caching the prefix
+        # avoids recomputing those identical tokens every call — significant
+        # given the victim is the highest-volume LLM. The shared LoRA model
+        # already has this on. Opt-in for this optimization run; set
+        # AUTORED_VICTIM_PREFIX_CACHING=0 to disable (e.g. to isolate its effect).
+        "enable_prefix_caching": os.environ.get(
+            "AUTORED_VICTIM_PREFIX_CACHING", "1"
+        ) == "1",
     }
     if _VICTIM_QUANTIZATION:
         victim_kwargs["quantization"] = _VICTIM_QUANTIZATION
@@ -6012,22 +6024,36 @@ def _silent_test_batch(scenarios: list, template_agent: RedTeamingAgent) -> list
                 if _fb.should_trigger(best_attack_data=_seed, all_attempts_failed=True):
                     newly_done_failures.append(idx)
             if newly_done_failures:
-                from mutation_fallback import run_mutation_fallback
+                # Fix #3: batch mutation fallback across scenarios. Instead of
+                # calling run_mutation_fallback once per failed scenario (each
+                # issuing its own victim query of ~8 convs), collect all failed
+                # scenarios' round-1 variants into ONE victim query and all
+                # round-2-eligible scenarios' variants into one more. The victim
+                # vLLM has ~6.87× concurrency headroom; an 8-conv per-scenario
+                # query underfills it and B scenarios serialize through B
+                # sequential queries. One big batched query amortizes the
+                # victim's prefill/decode across all concurrent scenarios.
+                # Per-scenario success attribution, mutator attribution, no-op
+                # flags, and round-2 re-seeding are all preserved (round count
+                # unchanged: max 2). See run_mutation_fallback_batch.
+                from mutation_fallback import run_mutation_fallback_batch
 
-                for idx in newly_done_failures:
-                    _seed = _pick_seed(idx)
-                    fb_result = run_mutation_fallback(
-                        fallback=_fb,
-                        best_attack_data=_seed,
-                        scenario=envs[idx].scenario,
-                        extractor=agents[idx].extractor,
-                        chat_fn=chat_with_llama_messages_batch,
-                        strip_fn=strip_few_shot_patterns,
-                        pool_resolver=(
-                            resolve_mutator_pool_cooperative
-                            if _COOPERATIVE_SEEDING else resolve_mutator_pool
-                        ),
-                    )
+                fb_jobs = [
+                    (_pick_seed(idx), envs[idx].scenario, agents[idx].extractor)
+                    for idx in newly_done_failures
+                ]
+                fb_results = run_mutation_fallback_batch(
+                    fallback=_fb,
+                    jobs=fb_jobs,
+                    chat_fn=chat_with_llama_messages_batch,
+                    strip_fn=strip_few_shot_patterns,
+                    pool_resolver=(
+                        resolve_mutator_pool_cooperative
+                        if _COOPERATIVE_SEEDING else resolve_mutator_pool
+                    ),
+                )
+
+                for idx, fb_result in zip(newly_done_failures, fb_results):
                     # Append fallback trace entries (with per-variant mutator + no-op
                     # diagnostics for post-run attribution / wasted-query accounting).
                     _fb_mutators = fb_result.mutator_used_per_variant

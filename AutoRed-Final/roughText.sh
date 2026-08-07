@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./hpc/autored_benchmark_4gpu_vllm.sh \
   --victim-model-id meta-llama/Meta-Llama-3-8B-Instruct \
   --attempts 20 \
   --gpu-memory-utilization 0.50 \
-  --shared-gpu-memory-utilization 0.48 \
+  --shared-gpu-memory-utilization 0.44 \
   --dataset-path data/TensorTrust_subsets/subset_8_ac30_all_alpha_direct_or_deterministic_or_indirect.jsonl \
   --dataset-size 1000 \
   --mutation-fallback \
