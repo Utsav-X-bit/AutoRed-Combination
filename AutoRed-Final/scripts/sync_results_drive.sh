@@ -161,8 +161,14 @@ echo "      file count in results/: $(find "$RESULTS_DIR" -type f | wc -l)"
 # Upload (unless dry-run)
 # ---------------------------------------------------------------------------
 REMOTE_PATH="${REMOTE}:${REMOTE_RESULTS_DIR}/${ZIP_NAME}"
+# IMPORTANT: rclone copy's destination must be the *directory* (with trailing
+# slash), NOT the full file path. `rclone copy file.zip remote:dir/file.zip`
+# treats `file.zip` as a directory and nests the file inside it
+# (dir/file.zip/file.zip). Copying into `remote:dir/` lands the file as
+# dir/file.zip — a real file, which is what the pull script's matcher expects.
+REMOTE_DIR="${REMOTE}:${REMOTE_RESULTS_DIR}/"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  echo "[2/3] (dry-run) would run: rclone copy \"${ZIP_PATH}\" \"${REMOTE_PATH}\" --progress ${RCLONE_ROOT_FLAGS[*]}"
+  echo "[2/3] (dry-run) would run: rclone copy \"${ZIP_PATH}\" \"${REMOTE_DIR}\" --progress ${RCLONE_ROOT_FLAGS[*]}"
   echo "      (zip kept locally: ${ZIP_PATH})"
   echo "      (no upload, no local cleanup)"
   echo "[3/3] done (dry-run)"
@@ -173,15 +179,18 @@ echo "[2/3] Uploading to ${REMOTE_PATH}"
 if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
   echo "      (pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})"
 fi
-if ! rclone copy "${ZIP_PATH}" "${REMOTE_PATH}" --progress "${RCLONE_ROOT_FLAGS[@]}"; then
+if ! rclone copy "${ZIP_PATH}" "${REMOTE_DIR}" --progress "${RCLONE_ROOT_FLAGS[@]}"; then
   echo "error: rclone upload failed. Local zip preserved: ${ZIP_PATH}" >&2
   echo "       re-run, or upload manually." >&2
   exit 1
 fi
 
-# Verify the upload by checking the remote object exists.
-if ! rclone lsf "${REMOTE}:${REMOTE_RESULTS_DIR}/${ZIP_NAME}" "${RCLONE_ROOT_FLAGS[@]}" >/dev/null 2>&1; then
-  echo "error: upload verification failed — ${ZIP_NAME} not found on remote." >&2
+# Verify the upload: confirm ${ZIP_NAME} exists as a FILE in the remote dir.
+# Using --files-only prevents a folder-with-the-same-name from passing as
+# "uploaded" (the earlier bug: rclone made results_<ts>.zip/ a directory).
+if ! rclone lsf "${REMOTE_DIR}" --files-only "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null | grep -qx "${ZIP_NAME}"; then
+  echo "error: upload verification failed — ${ZIP_NAME} not found as a file on remote." >&2
+  echo "       (if a directory named ${ZIP_NAME} exists, delete it: rclone purge \"${REMOTE_PATH}/\" ${RCLONE_ROOT_FLAGS[*]})" >&2
   echo "       local zip preserved: ${ZIP_PATH}" >&2
   exit 1
 fi

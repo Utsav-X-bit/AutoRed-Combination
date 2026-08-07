@@ -101,9 +101,11 @@ HELP
 }
 
 list_remote_archives() {
-  # Print remote results_*.zip filenames, one per line, sorted (oldest→newest).
-  rclone lsf "${REMOTE}:${REMOTE_RESULTS_DIR}/" "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null \
-    | grep -E '^results_[0-9]+\.zip$' || true
+  # Print remote results_*.zip FILE names, one per line, sorted (oldest→newest).
+  # --files-only excludes directories, so a stray folder named like a zip
+  # (the earlier rclone-copy-into-path bug) can't masquerade as an archive.
+  rclone lsf "${REMOTE}:${REMOTE_RESULTS_DIR}/" --files-only "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null \
+    | grep -E '^results_[0-9_]+\.zip$' || true
 }
 
 latest_remote_zip() {
