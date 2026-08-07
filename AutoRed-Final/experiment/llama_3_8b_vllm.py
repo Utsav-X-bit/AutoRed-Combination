@@ -6592,6 +6592,24 @@ if __name__ == "__main__":
         "Use larger values (e.g., 5000) for bigger benchmarks to avoid repeated scenarios.",
     )
     parser.add_argument(
+        "--dedup-scenarios",
+        dest="dedup_scenarios",
+        action="store_true",
+        default=False,
+        help=(
+            "Drop duplicate scenarios from the pool on (opening_defense, "
+            "closing_defense, access_code) BEFORE sampling/slicing. Collapses "
+            "only true duplicates (identical prompt AND identical secret); "
+            "same-template-different-secret scenarios are preserved. Applied "
+            "to defense_df so --start-idx cuts a unique-problem slice. Off by "
+            "default — enable for model-evaluation benchmarks that require "
+            "distinct attack problems. Two runs sharing --seed and --start-idx "
+            "are still comparable WITH dedup enabled (the dedup'd index space "
+            "is deterministic); do not mix dedup and non-dedup runs under the "
+            "same --start-idx (indices shift once the pool is dedup'd)."
+        ),
+    )
+    parser.add_argument(
         "--validate", action="store_true", help="Run generator validation before attack"
     )
     parser.add_argument(
@@ -6869,8 +6887,16 @@ if __name__ == "__main__":
     # Load victim model (must happen inside __main__ for vLLM spawn safety)
     _load_models()
 
-    # Reload dataset with requested size (handles both server and non-server mode)
-    if args.dataset_size != _DEFAULT_DATASET_SIZE or defender_df is None or args.dataset_path != DATA_PATH:
+    # Reload dataset with requested size (handles both server and non-server mode).
+    # Also fires when --dedup-scenarios is set, so the dedup'd pool is what the
+    # benchmark slices (run_benchmark reads defense_df/defender_df from module
+    # globals; this top-level block rebinds those globals).
+    if (
+        args.dataset_size != _DEFAULT_DATASET_SIZE
+        or defender_df is None
+        or args.dataset_path != DATA_PATH
+        or getattr(args, "dedup_scenarios", False)
+    ):
         if defender_df is None or args.dataset_path != DATA_PATH:
             # Server mode or fallback — load from disk
             print(f"\n[LOAD] Loading defense dataset from {args.dataset_path}...")
@@ -6879,6 +6905,24 @@ if __name__ == "__main__":
                 args.dataset_path, lines=True, compression=comp
             ).set_index("defense_id")
             defense_df = raw_defenses.dropna(subset=["access_code"])
+
+        # Optional dedup: collapse true duplicates (identical opening_defense +
+        # closing_defense + access_code) BEFORE sampling/slicing. Keeps the
+        # first occurrence per group, so the defense_id index stays meaningful.
+        # Same-template-different-secret scenarios (same od+cd, different code)
+        # are PRESERVED — only fully-identical rows collapse. Applied to the
+        # full pool (defense_df) so --start-idx cuts a unique-problem slice.
+        if getattr(args, "dedup_scenarios", False):
+            before = len(defense_df)
+            defense_df = defense_df.drop_duplicates(
+                subset=["opening_defense", "closing_defense", "access_code"],
+                keep="first",
+            )
+            print(
+                f"[LOAD] --dedup-scenarios: {before} → {len(defense_df)} scenarios "
+                f"({before - len(defense_df)} true duplicates removed on "
+                f"opening_defense + closing_defense + access_code)"
+            )
 
         actual_size = args.dataset_size
         print(f"[LOAD] Sampling dataset with size={actual_size}...")

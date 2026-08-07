@@ -128,6 +128,7 @@ MAX_FALLBACK_ROUNDS=2
 COOPERATIVE_SEEDING=1
 COOPERATIVE_N=""
 PLANNER_TEMP_ESCALATION=0.0
+DEDUP_SCENARIOS=0
 OUTPUT_DIR=""
 NUM_GPUS=4
 
@@ -168,6 +169,10 @@ OPTIONS (all optional; defaults shown)
   --no-cooperative-seeding     Disable cooperative seeding
   --cooperative-n N            Best-of-N cap on cooperative seeds (8..12)
   --planner-temp-escalation F  Raise planner temp to F when stuck (0.0 = off)
+  --dedup-scenarios            Drop true-duplicate scenarios (identical prompt
+                               AND access code) from the pool before slicing, so
+                               --start-idx cuts a unique-problem benchmark. Off
+                               by default; enable for model evaluation.
   --output-dir DIR             Results characteristics dir
                                (default results/benchmark/batched_<rounds>r_<gpus>gpu)
   --num-gpus N                 Workers to launch (default 4)
@@ -204,6 +209,7 @@ while [[ $# -gt 0 ]]; do
     --no-cooperative-seeding)  COOPERATIVE_SEEDING=0; shift ;;
     --cooperative-n)           COOPERATIVE_N="$2"; shift 2 ;;
     --planner-temp-escalation) PLANNER_TEMP_ESCALATION="$2"; shift 2 ;;
+    --dedup-scenarios)         DEDUP_SCENARIOS=1; shift ;;
     --output-dir)              OUTPUT_DIR="$2"; shift 2 ;;
     --num-gpus)                NUM_GPUS="$2"; shift 2 ;;
     --help|-h)                 print_help; exit 0 ;;
@@ -339,6 +345,9 @@ for WORKER_ID in $(seq 0 $((NUM_GPUS - 1))); do
     fi
     if [[ "$PLANNER_TEMP_ESCALATION" != "0.0" ]]; then
         WORKER_ARGS+=(--planner-temp-escalation "$PLANNER_TEMP_ESCALATION")
+    fi
+    if [[ "$DEDUP_SCENARIOS" -eq 1 ]]; then
+        WORKER_ARGS+=(--dedup-scenarios)
     fi
 
     # Launch worker on a specific GPU. Use env so CUDA_VISIBLE_DEVICES is set
