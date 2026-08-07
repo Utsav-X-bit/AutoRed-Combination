@@ -17,5 +17,3 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./hpc/autored_benchmark_4gpu_vllm.sh \
   --output-dir "results/benchmarks/Llama3-1000-2000_Mutation-3_subset-8_seed-7/$(date +%F_%H-%M-%S)_4g" \
   --start-idx 1000 \
   --seed 7 \
-  --cooperative-seeding \
-  --cooperative-n 12
