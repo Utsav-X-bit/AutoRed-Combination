@@ -283,28 +283,49 @@ def get_benchmark(benchmark_id: str) -> Optional[Dict[str, Any]]:
     timestamp = metadata.get("timestamp", "")
 
     if entry["layout"] == "nested":
-        run_files = _run_files_in(entry["benchmark_dir"])
-        trace_runs = [_run_metadata_from_file(p) for p in run_files]
+        # Present the local runs as TWO pseudo-archives — success and failed —
+        # so the UI shows the success/failed split the user clicks into, rather
+        # than one combined flat list. Each archive exposes only its own runs.
+        runs_root = entry["benchmark_dir"] / "runs"
+        success_files = (
+            sorted((runs_root / "success").glob("run_*.json"))
+            if (runs_root / "success").exists() else []
+        )
+        failed_files = (
+            sorted((runs_root / "failed").glob("run_*.json"))
+            if (runs_root / "failed").exists() else []
+        )
+        chars_name = entry["benchmark_dir"].name
+        archive_date = _archive_date_from_timestamp(timestamp) or ""
         trace_archives: List[Dict[str, Any]] = []
-        if trace_runs:
-            # Present the local runs as a single pseudo-archive for the UI.
-            trace_archives = [{
-                "archive_id": f"{entry['benchmark_dir'].name}/runs",
-                "date": _archive_date_from_timestamp(timestamp) or "",
-                "path": str(entry["benchmark_dir"] / "runs"),
-                "timestamp": trace_runs[0].get("timestamp", "") if trace_runs else "",
-                "run_count": len(trace_runs),
+        trace_runs: List[Dict[str, Any]] = []
+        for label, files in (("success", success_files), ("failed", failed_files)):
+            runs = [_run_metadata_from_file(p) for p in files]
+            if not runs:
+                continue
+            # archive_id is "<chars>/runs/<label>" so it is BOTH a contiguous
+            # substring of each run's file_path (BenchmarkDashboard filters the
+            # combined trace_runs list via run.file_path.includes(archive_id))
+            # AND unique per benchmark (RunLoader keys expand-state by archive_id
+            # alone, so a bare "runs/success" would collide across benchmarks).
+            trace_archives.append({
+                "archive_id": f"{chars_name}/runs/{label}",
+                "date": archive_date,
+                "path": str(runs_root / label),
+                "timestamp": runs[0].get("timestamp", ""),
+                "run_count": len(runs),
                 "success_rate": (
-                    sum(int(r["success"]) for r in trace_runs) / len(trace_runs)
-                    if trace_runs else 0.0
+                    sum(int(r["success"]) for r in runs) / len(runs)
+                    if runs else 0.0
                 ),
                 "verified_rate": (
-                    sum(int(r["verified_success"]) for r in trace_runs) / len(trace_runs)
-                    if trace_runs else 0.0
+                    sum(int(r["verified_success"]) for r in runs) / len(runs)
+                    if runs else 0.0
                 ),
                 "avg_attempts_on_success": 0.0,
-                "runs": trace_runs,
-            }]
+                "runs": runs,
+            })
+            trace_runs.extend(runs)
     else:
         trace_archives = [_summarize_trace_archive(p) for p in _trace_archives_for_timestamp(timestamp)]
         trace_runs = []
@@ -394,12 +415,19 @@ def list_all_runs_recursive() -> List[Dict[str, Any]]:
 
 
 def get_run(run_id: str) -> Optional[Dict[str, Any]]:
-    """Load a specific run by run_id."""
+    """Load a specific run by run_id.
+
+    Searches EVERYWHERE under results/ — including the benchmark trees — so a
+    drill-down click on a per-round run surfaced via a benchmark's trace
+    archive resolves. ``list_runs``/``list_all_runs_recursive`` deliberately
+    keep benchmark per-round JSONs out of the top-level run lists; this is the
+    one path that opens them.
+    """
     ensure_results_dir()
     candidates = list(RESULTS_DIR.glob("*.json")) + list(RESULTS_DIR.rglob("run_*.json"))
     seen: set[Path] = set()
     for path in sorted(candidates, key=os.path.getmtime, reverse=True):
-        if path in seen or _is_benchmark_artifact(path):
+        if path in seen:
             continue
         seen.add(path)
         try:

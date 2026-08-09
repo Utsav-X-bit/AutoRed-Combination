@@ -154,6 +154,28 @@ if ! command -v unzip >/dev/null 2>&1; then
   echo "error: unzip not found." >&2; exit 1
 fi
 
+# Scope guard: rclone defaults to the restrictive 'drive.file' scope when scope
+# is unset, which lets it see ONLY files created by this own rclone instance —
+# it CANNOT see the contents of a folder shared by another account (e.g. the
+# pinned shared results folder pushed from a coworker's account). That is the
+# classic "no results*.zip on the drive" on a second machine. We need the full
+# 'drive' scope to list the shared folder. Warn clearly before the pull fails.
+remote_scope="$(rclone config show "$REMOTE" 2>/dev/null | awk -F'=' '/^[[:space:]]*scope[[:space:]]*=/{gsub(/[[:space:]]/,"",$2);print $2}')"
+if [[ -z "$remote_scope" ]]; then
+  remote_scope="drive.file"   # rclone's default when scope is absent
+fi
+if [[ "$remote_scope" != "drive" ]]; then
+  echo "WARNING: rclone remote '${REMOTE}' has scope '${remote_scope}' (not 'drive')." >&2
+  echo "         scope='${remote_scope}' only sees files created by this rclone instance —" >&2
+  echo "         it CANNOT list a folder shared by another account (e.g. the pinned" >&2
+  echo "         shared results folder). If the pull below fails with 'no results*.zip'," >&2
+  echo "         fix the remote on THIS machine with:" >&2
+  echo "             rclone config        # edit '${REMOTE}' → advanced → scope = drive" >&2
+  echo "         then re-authorize and re-run this script. Also confirm the shared folder" >&2
+  echo "         ${DRIVE_ROOT_FOLDER_ID} is shared with this Google account." >&2
+  echo >&2
+fi
+
 # ---------------------------------------------------------------------------
 # --list: just show archives and exit
 # ---------------------------------------------------------------------------
