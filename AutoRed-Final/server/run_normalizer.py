@@ -210,6 +210,7 @@ def _normalize_attempt(raw: Any, index: int) -> Dict[str, Any]:
         "ground_truth_found": bool(attempt.get("ground_truth_found", False)),
         "extractor_match": bool(attempt.get("extractor_match", False)),
         "generator_success": bool(attempt.get("generator_success", False)),
+        "access_granted": bool(attempt.get("access_granted", False)),
     }
 
 
@@ -321,6 +322,7 @@ def normalize_run(data: Any, fallback_run_id: str = "") -> Dict[str, Any]:
         "generator_success": bool(result.get("generator_success", False)),
         "extractor_success": bool(result.get("extractor_success", False)),
         "verified_success": bool(result.get("verified_success", False)),
+        "access_granted_success": bool(result.get("access_granted_success", False)),
         "extracted_value": _text(result.get("extracted_value")),
         "success_reason": result.get("success_reason"),
         "total_attempts": _integer(result.get("total_attempts"), len(attempts)),

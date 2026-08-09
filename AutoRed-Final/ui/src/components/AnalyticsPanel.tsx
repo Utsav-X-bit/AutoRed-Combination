@@ -1,4 +1,5 @@
 import { useRunStore } from '../store/runStore';
+import { isRunSuccessful } from '../utils/success';
 
 export default function AnalyticsPanel() {
   const { selectedRun } = useRunStore();
@@ -42,6 +43,12 @@ export default function AnalyticsPanel() {
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Access Granted</span>
+            <span className={`font-bold ${result.access_granted_success ? 'text-purple-600' : 'text-red-600'}`}>
+              {result.access_granted_success ? '✓' : '✗'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
             <span className="text-slate-600">Extractor</span>
             <span className={`font-bold ${result.extractor_success ? 'text-green-600' : 'text-red-600'}`}>
               {result.extractor_success ? '✓' : '✗'}
@@ -66,8 +73,8 @@ export default function AnalyticsPanel() {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-600">Success</span>
-            <span className={`font-bold ${result.ground_truth_success ? 'text-green-600' : 'text-red-600'}`}>
-              {result.ground_truth_success ? 'YES' : 'NO'}
+            <span className={`font-bold ${isRunSuccessful(selectedRun) ? 'text-green-600' : 'text-red-600'}`}>
+              {isRunSuccessful(selectedRun) ? 'YES' : 'NO'}
             </span>
           </div>
         </div>

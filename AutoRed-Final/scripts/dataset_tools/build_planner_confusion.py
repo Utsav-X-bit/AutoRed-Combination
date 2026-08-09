@@ -51,8 +51,9 @@ def build_confusion_matrix(results_dir, output_file):
             extractor_verified = attempt.get("extractor", {}).get("verified", False)
             ver_success = attempt.get("verification", {}).get("success", False)
             gt_leaked = attempt.get("ground_truth_found", False) or attempt.get("extractor", {}).get("ground_truth_leaked", False)
-            
-            if ver_success or extractor_verified or gt_leaked:
+            ag_success = attempt.get("access_granted", False)
+
+            if ver_success or extractor_verified or gt_leaked or ag_success:
                 oracle_strategy = attempt.get("generator", {}).get("strategy")
                 oracle_attempt_number = attempt.get("attempt_number")
                 winning_attack = attempt.get("generator", {}).get("generated_attack")

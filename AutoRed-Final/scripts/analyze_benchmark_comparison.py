@@ -79,7 +79,7 @@ RESULTS_BANNER_RE = re.compile(r"📊 BENCHMARK RESULTS")
 SUMMARY_SAVED_RE = re.compile(r"\[JSON\] Worker summary saved to")
 
 MUTATORS = ["EN", "PI", "SR", "TL"]
-SUCCESS_PATHS = ["gt_leak", "extractor", "verified", "fallback", "none"]
+SUCCESS_PATHS = ["gt_leak", "access_granted", "extractor", "verified", "fallback", "none"]
 
 
 # --- result loading ---------------------------------------------------------
@@ -106,7 +106,14 @@ def load_worker_summaries(run_dir: Path) -> dict[int, dict]:
 
 
 def load_merged(run_dir: Path):
-    return _load_json(run_dir / "logs" / MERGED_NAME)
+    # Results-layout v3 keeps merged_summary.json under <run_dir>/logs/; the
+    # older flat-layout launchers (autored_benchmark_4gpu.sh,
+    # benchmark_multigpu.sh) write it directly under <run_dir>. Support both so
+    # auto-analysis works regardless of which launcher produced the run.
+    nested = run_dir / "logs" / MERGED_NAME
+    if nested.exists():
+        return _load_json(nested)
+    return _load_json(run_dir / MERGED_NAME)
 
 
 # --- worker log parsing -----------------------------------------------------
@@ -252,6 +259,7 @@ def aggregate_results(summaries: dict[int, dict]) -> dict:
         "total_successes": 0,
         "total_success_exact": 0,
         "total_success_extractor": 0,
+        "total_access_granted": 0,
         "top1_success": 0,
         "top3_success": 0,
         "top5_success": 0,
@@ -278,6 +286,7 @@ def aggregate_results(summaries: dict[int, dict]) -> dict:
         agg["total_successes"] += d.get("total_successes", 0)
         agg["total_success_exact"] += d.get("total_success_exact", 0)
         agg["total_success_extractor"] += d.get("total_success_extractor", 0)
+        agg["total_access_granted"] += d.get("total_access_granted", 0)
         agg["top1_success"] += d.get("top1_success", 0)
         agg["top3_success"] += d.get("top3_success", 0)
         agg["top5_success"] += d.get("top5_success", 0)
@@ -453,7 +462,8 @@ def build_report(run_dir: Path, summaries, logs, merged, run_status: str) -> str
     rows_pct = ["success_rate", "defense_rate"]
     rows_int = ["total_successes", "avg_attempts_on_success", "top1_success",
                 "top3_success", "top5_success", "verified_success",
-                "total_success_exact", "total_success_extractor", "total_rounds"]
+                "total_success_exact", "total_success_extractor",
+                "total_access_granted", "total_rounds"]
     for name in rows_pct:
         lines.append(f"| {name} | {_fmt_pct(agg[name])} |")
     for name in rows_int:
@@ -564,7 +574,8 @@ def build_report(run_dir: Path, summaries, logs, merged, run_status: str) -> str
         lines.append(
             f"- **top1_success**: {agg['top1_success']} | "
             f"**verified_success**: {agg['verified_success']} | "
-            f"**extractor_success**: {agg['total_success_extractor']}."
+            f"**extractor_success**: {agg['total_success_extractor']} | "
+            f"**access_granted**: {agg['total_access_granted']}."
         )
         lines.append(
             f"- **extractor F1**: {_fmt_pct(agg['f1'])} "
@@ -594,7 +605,9 @@ def build_report(run_dir: Path, summaries, logs, merged, run_status: str) -> str
 
 
 def run_status(run_dir: Path, summaries, logs) -> str:
-    merged = (run_dir / "logs" / MERGED_NAME).exists()
+    # merged_summary.json lives under logs/ (results-layout v3) or directly
+    # under run_dir (older flat layout) — accept either.
+    merged = (run_dir / "logs" / MERGED_NAME).exists() or (run_dir / MERGED_NAME).exists()
     n_jsons = len(summaries)
     if merged and n_jsons >= 1:
         return "complete"
@@ -614,11 +627,16 @@ def run_status(run_dir: Path, summaries, logs) -> str:
 
 def analyze(run_dir: Path, write: bool = True) -> str:
     run_dir = run_dir.resolve()
-    summaries = load_worker_summaries(run_dir / "logs")
-    if not summaries:
-        summaries = load_worker_summaries(run_dir)
+    # Data dir: results-layout v3 keeps worker_*.json + merged_summary.json under
+    # <run_dir>/logs/; older flat-layout launchers keep worker_*.json +
+    # merged_summary.json directly under <run_dir>. Resolve which holds the data.
+    logs_subdir = run_dir / "logs"
+    has_logs_subdir = logs_subdir.is_dir() and any(logs_subdir.glob("worker_*.json"))
+    data_dir = logs_subdir if has_logs_subdir else run_dir
+
+    summaries = load_worker_summaries(data_dir)
     logs = {}
-    for p in sorted((run_dir / "logs").glob("worker_*.log")):
+    for p in sorted(data_dir.glob("worker_*.log")):
         m = WORKER_LOG_RE.search(p.name)
         if m:
             logs[int(m.group(1))] = parse_worker_log(p)
@@ -626,7 +644,8 @@ def analyze(run_dir: Path, write: bool = True) -> str:
     status = run_status(run_dir, summaries, logs)
     report = build_report(run_dir, summaries, logs, merged, status)
     if write:
-        out = run_dir / "logs" / "analysis.md"
+        # Write analysis.md next to the data (logs/ for v3 layout, run_dir for flat).
+        out = data_dir / "analysis.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report)
         print(f"[analysis] wrote {out}")
@@ -658,9 +677,13 @@ def main(argv=None) -> int:
         start = time.monotonic()
         last_status = None
         while True:
-            summaries = load_worker_summaries(run_dir / "logs") or load_worker_summaries(run_dir)
+            # Resolve the data dir each poll (v3 logs/ subdir vs flat run_dir)
+            # — the layout may only become apparent once worker JSONs land.
+            cand = run_dir / "logs"
+            data_dir = cand if cand.is_dir() and any(cand.glob("worker_*.json")) else run_dir
+            summaries = load_worker_summaries(data_dir)
             logs = {}
-            for p in sorted((run_dir / "logs").glob("worker_*.log")):
+            for p in sorted(data_dir.glob("worker_*.log")):
                 m = WORKER_LOG_RE.search(p.name)
                 if m:
                     logs[int(m.group(1))] = parse_worker_log(p)

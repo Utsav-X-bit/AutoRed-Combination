@@ -19,7 +19,7 @@ export default function StrategyHeatmapTab() {
     const s = a.generator.strategy;
     if (!strategySuccess[s]) strategySuccess[s] = { total: 0, successes: 0 };
     strategySuccess[s].total += 1;
-    if (a.ground_truth_found) strategySuccess[s].successes += 1;
+    if (a.ground_truth_found || a.access_granted) strategySuccess[s].successes += 1;
   });
 
   const pieData = Object.entries(strategySuccess).map(([name, d]) => ({

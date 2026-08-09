@@ -187,6 +187,9 @@ export default function BenchmarkDashboard() {
   const currentVerifiedRate = summary && summary.total_rounds
     ? Number(summary.verified_success ?? 0) / Number(summary.total_rounds)
     : 0;
+  const currentAccessGrantedRate = summary && summary.total_rounds
+    ? Number(summary.total_access_granted ?? 0) / Number(summary.total_rounds)
+    : 0;
   const currentAvgAttempts = summary ? Number(summary.avg_attempts_on_success ?? 0) : 0;
   const currentTop1 = summary ? Number(summary.top1_success ?? 0) : 0;
   const currentTop3 = summary ? Number(summary.top3_success ?? 0) : 0;
@@ -198,6 +201,9 @@ export default function BenchmarkDashboard() {
         success_rate: previousBenchmark.success_rate,
         verified_rate: previousBenchmark.total_rounds
           ? previousBenchmark.verified_success / previousBenchmark.total_rounds
+          : 0,
+        access_granted_rate: previousBenchmark.total_rounds
+          ? Number(previousBenchmark.total_access_granted ?? 0) / previousBenchmark.total_rounds
           : 0,
         avg_attempts: previousBenchmark.avg_attempts_on_success,
         top1: previousBenchmark.top1_success,
@@ -211,6 +217,7 @@ export default function BenchmarkDashboard() {
     ? {
         success_rate: currentSuccessRate - previousSummary.success_rate,
         verified_rate: currentVerifiedRate - previousSummary.verified_rate,
+        access_granted_rate: currentAccessGrantedRate - previousSummary.access_granted_rate,
         avg_attempts: currentAvgAttempts - previousSummary.avg_attempts,
         top1: currentTop1 - previousSummary.top1,
         top3: currentTop3 - previousSummary.top3,
@@ -314,7 +321,7 @@ export default function BenchmarkDashboard() {
           </div>
         )}
 
-        <section className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        <section className="grid grid-cols-2 lg:grid-cols-7 gap-4">
           <MetricCard
             label="Success Rate"
             value={formatPct(summary ? Number(summary.success_rate ?? 0) : 0)}
@@ -326,6 +333,12 @@ export default function BenchmarkDashboard() {
             value={formatPct(currentVerifiedRate)}
             subtext={`${formatNumber(summary?.verified_success ?? 0)} verified`}
             delta={currentVsPrevious ? formatDelta(currentVsPrevious.verified_rate) : 'baseline n/a'}
+          />
+          <MetricCard
+            label="Access Granted Rate"
+            value={formatPct(currentAccessGrantedRate)}
+            subtext={`${formatNumber(summary?.total_access_granted ?? 0)} granted`}
+            delta={currentVsPrevious ? formatDelta(currentVsPrevious.access_granted_rate) : 'baseline n/a'}
           />
           <MetricCard
             label="Avg Attempts"
@@ -417,7 +430,7 @@ export default function BenchmarkDashboard() {
                     <span className="text-xs text-slate-500">{archive.run_count} runs</span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Success {formatPct(archive.success_rate)} · Verified {formatPct(archive.verified_rate)} · Avg attempts {formatNumber(archive.avg_attempts_on_success)}
+                    Success {formatPct(archive.success_rate)} · Verified {formatPct(archive.verified_rate)} · Access granted {formatPct(archive.access_granted_rate)} · Avg attempts {formatNumber(archive.avg_attempts_on_success)}
                   </p>
                 </button>
               )) : (
@@ -514,9 +527,9 @@ export default function BenchmarkDashboard() {
                       <Td>{run.attempt_count ?? run.total_attempts}</Td>
                       <Td>
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                          run.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          run.access_granted_success ? 'bg-purple-100 text-purple-700' : run.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                         }`}>
-                          {run.verified_success ? 'verified' : run.success ? 'success' : 'failed'}
+                          {run.access_granted_success ? 'access granted' : run.verified_success ? 'verified' : run.success ? 'success' : 'failed'}
                         </span>
                       </Td>
                       <Td className="font-mono text-amber-700">{run.access_code || 'n/a'}</Td>

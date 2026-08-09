@@ -250,7 +250,7 @@ async def _run_experiment_task(run_id: str, scenario_id: Optional[str], max_atte
             result_info = result.get("result", {})
             success = any(
                 bool(result_info.get(key))
-                for key in ("ground_truth_success", "extractor_success", "verified_success")
+                for key in ("ground_truth_success", "access_granted_success", "extractor_success", "verified_success")
             )
             logger.info(f"[SERVER] ✓ Experiment {run_id} COMPLETED: attempts={total_attempts}, success={success}")
         except Exception as e:
@@ -291,7 +291,7 @@ def api_export_csv(run_id: str):
         fieldnames = [
             "attempt", "strategy", "attack", "judge_decision",
             "ground_truth_found", "extractor_match", "best_candidate",
-            "verification_success"
+            "verification_success", "access_granted"
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -305,6 +305,7 @@ def api_export_csv(run_id: str):
                 "extractor_match": a.get("extractor_match"),
                 "best_candidate": a.get("extractor", {}).get("best_candidate"),
                 "verification_success": a.get("verification", {}).get("success"),
+                "access_granted": a.get("access_granted", False),
             }
             writer.writerow(row)
 
@@ -326,7 +327,7 @@ def api_export_html(run_id: str):
     result = run.get("result", {})
     success = any(
         bool(result.get(key))
-        for key in ("ground_truth_success", "extractor_success", "verified_success")
+        for key in ("ground_truth_success", "access_granted_success", "extractor_success", "verified_success")
     )
     success_badge = f'<span class="badge {"badge-green" if success else "badge-red"}">{"✓" if success else "✗"}</span>'
 
@@ -354,6 +355,7 @@ pre {{ background: #f1f5f9; padding: 0.75rem; border-radius: 0.375rem; overflow-
 <div class="card">
 <p>Overall: {success_badge}</p>
 <p>Ground Truth: <span class="badge {'badge-green' if run.get('result', {}).get('ground_truth_success') else 'badge-red'}">{'✓' if run.get('result', {}).get('ground_truth_success') else '✗'}</span></p>
+<p>Access Granted: <span class="badge {'badge-green' if run.get('result', {}).get('access_granted_success') else 'badge-red'}">{'✓' if run.get('result', {}).get('access_granted_success') else '✗'}</span></p>
 <p>Extractor: <span class="badge {'badge-green' if run.get('result', {}).get('extractor_success') else 'badge-red'}">{'✓' if run.get('result', {}).get('extractor_success') else '✗'}</span></p>
 <p>Verifier: <span class="badge {'badge-green' if run.get('result', {}).get('verified_success') else 'badge-red'}">{'✓' if run.get('result', {}).get('verified_success') else '✗'}</span></p>
 <p>Attempts: {esc(run.get('result', {}).get('total_attempts', 0))}</p>
@@ -361,16 +363,17 @@ pre {{ background: #f1f5f9; padding: 0.75rem; border-radius: 0.375rem; overflow-
 
 <h2>Attempts</h2>
 <table>
-<tr><th>#</th><th>Strategy</th><th>Judge</th><th>GT Found</th><th>Extractor</th><th>Best Candidate</th></tr>
+<tr><th>#</th><th>Strategy</th><th>Judge</th><th>GT Found</th><th>Access</th><th>Extractor</th><th>Best Candidate</th></tr>
 """
     for a in run.get("attempts", []):
         gt = '<span class="badge badge-green">✓</span>' if a.get("ground_truth_found") else '<span class="badge badge-red">✗</span>'
+        ag = '<span class="badge badge-green">✓</span>' if a.get("access_granted") else '<span class="badge badge-red">✗</span>'
         ext = '<span class="badge badge-green">✓</span>' if a.get("extractor_match") else '<span class="badge badge-red">✗</span>'
         html += (
             f'<tr><td>{esc(a.get("attempt_number"))}</td>'
             f'<td>{esc(a.get("generator", {}).get("strategy"))}</td>'
             f'<td>{esc(a.get("judge", {}).get("decision"))}</td>'
-            f'<td>{gt}</td><td>{ext}</td>'
+            f'<td>{gt}</td><td>{ag}</td><td>{ext}</td>'
             f'<td>{esc(a.get("extractor", {}).get("best_candidate", "N/A"))}</td></tr>\n'
         )
 

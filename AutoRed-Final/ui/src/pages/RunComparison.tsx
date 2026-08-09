@@ -86,6 +86,12 @@ export default function RunComparison() {
                 </p>
               </div>
               <div>
+                <p className="text-xs text-slate-500">Access Granted</p>
+                <p className={`font-bold ${runA.result.access_granted_success ? 'text-purple-600' : 'text-red-600'}`}>
+                  {runA.result.access_granted_success ? '✓' : '✗'}
+                </p>
+              </div>
+              <div>
                 <p className="text-xs text-slate-500">Run Time</p>
                 <p className="font-medium">{runA.timing.total_run_time.toFixed(1)}s</p>
               </div>
@@ -119,6 +125,12 @@ export default function RunComparison() {
                 <p className="text-xs text-slate-500">Extractor</p>
                 <p className={`font-bold ${runB.result.extractor_success ? 'text-green-600' : 'text-red-600'}`}>
                   {runB.result.extractor_success ? '✓' : '✗'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Access Granted</p>
+                <p className={`font-bold ${runB.result.access_granted_success ? 'text-purple-600' : 'text-red-600'}`}>
+                  {runB.result.access_granted_success ? '✓' : '✗'}
                 </p>
               </div>
               <div>
@@ -188,13 +200,14 @@ export default function RunComparison() {
                           <>
                             <span className="font-mono text-xs">{a.generator.strategy}</span>
                             {a.ground_truth_found && <span className="ml-1 text-green-600">✓</span>}
+                            {a.access_granted && <span className="ml-1 text-purple-600">✓</span>}
                           </>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="py-2 px-3">
                         {a ? (
-                          <span className={`text-xs ${a.extractor_match ? 'text-green-600' : 'text-red-600'}`}>
-                            {a.extractor_match ? '✓' : '✗'}
+                          <span className={`text-xs ${a.extractor_match ? 'text-green-600' : a.access_granted ? 'text-purple-600' : 'text-red-600'}`}>
+                            {a.extractor_match ? '✓' : a.access_granted ? '✓' : '✗'}
                           </span>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
@@ -203,13 +216,14 @@ export default function RunComparison() {
                           <>
                             <span className="font-mono text-xs">{b.generator.strategy}</span>
                             {b.ground_truth_found && <span className="ml-1 text-green-600">✓</span>}
+                            {b.access_granted && <span className="ml-1 text-purple-600">✓</span>}
                           </>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="py-2 px-3">
                         {b ? (
-                          <span className={`text-xs ${b.extractor_match ? 'text-green-600' : 'text-red-600'}`}>
-                            {b.extractor_match ? '✓' : '✗'}
+                          <span className={`text-xs ${b.extractor_match ? 'text-green-600' : b.access_granted ? 'text-purple-600' : 'text-red-600'}`}>
+                            {b.extractor_match ? '✓' : b.access_granted ? '✓' : '✗'}
                           </span>
                         ) : <span className="text-slate-300">—</span>}
                       </td>

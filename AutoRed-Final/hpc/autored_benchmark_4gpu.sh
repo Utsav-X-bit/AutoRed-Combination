@@ -152,3 +152,21 @@ else
     echo "[ERROR] Merge script failed!"
     exit 1
 fi
+
+# =============================================================================
+# Auto-run the benchmark analysis report
+# =============================================================================
+# Runs immediately after a successful merge so every finished benchmark lands
+# with an analysis.md next to its merged_summary.json. Non-fatal: a report
+# hiccup must never mask a successful benchmark. This launcher uses the flat
+# layout (worker JSONs + merged_summary.json directly in OUTPUT_DIR, no logs/
+# subdir), so pass OUTPUT_DIR as the run dir — the analysis script resolves
+# the flat layout automatically.
+echo ""
+echo "[ANALYSIS] Generating benchmark report..."
+if python scripts/analyze_benchmark_comparison.py --run-dir "$OUTPUT_DIR"; then
+    echo "[ANALYSIS] Report written to $OUTPUT_DIR/analysis.md"
+else
+    echo "[WARN] Analysis script failed — benchmark results are still valid." >&2
+    echo "       Re-run manually: python scripts/analyze_benchmark_comparison.py --run-dir \"$OUTPUT_DIR\"" >&2
+fi

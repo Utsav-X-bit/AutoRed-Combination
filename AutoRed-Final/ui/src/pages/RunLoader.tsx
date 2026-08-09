@@ -321,10 +321,16 @@ export default function RunLoader() {
                       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
                       {state.detail && (
                         <>
-                          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+                          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 text-sm">
                             <div className="bg-white border border-slate-200 rounded-lg p-3">
                               <p className="text-xs text-slate-500">Success rate</p>
                               <p className="font-semibold text-slate-900">{formatPct(state.detail.summary.success_rate ?? benchmark.success_rate)}</p>
+                            </div>
+                            <div className="bg-white border border-slate-200 rounded-lg p-3">
+                              <p className="text-xs text-slate-500">Access granted</p>
+                              <p className="font-semibold text-purple-700">
+                                {state.detail.summary.total_access_granted ?? benchmark.total_access_granted ?? 0}
+                              </p>
                             </div>
                             <div className="bg-white border border-slate-200 rounded-lg p-3">
                               <p className="text-xs text-slate-500">Verified success</p>
@@ -367,7 +373,7 @@ export default function RunLoader() {
                                     <div className="min-w-0">
                                       <p className="text-sm font-medium text-slate-900 truncate">{archive.archive_id}</p>
                                       <p className="text-xs text-slate-500">
-                                        {archive.run_count} run(s) · {formatDateTime(archive.timestamp)} · success {formatPct(archive.success_rate)}
+                                        {archive.run_count} run(s) · {formatDateTime(archive.timestamp)} · success {formatPct(archive.success_rate)} · access granted {formatPct(archive.access_granted_rate)}
                                       </p>
                                     </div>
                                     <span className="text-xs text-slate-500">{isOpen ? 'Hide' : 'Show'}</span>
@@ -375,7 +381,8 @@ export default function RunLoader() {
 
                                   {isOpen && (
                                     <div className="border-t border-slate-200 p-4 space-y-3">
-                                      <div className="grid grid-cols-3 gap-3 text-xs text-slate-600">
+                                      <div className="grid grid-cols-4 gap-3 text-xs text-slate-600">
+                                        <div>Access granted: {formatPct(archive.access_granted_rate)}</div>
                                         <div>Verified rate: {formatPct(archive.verified_rate)}</div>
                                         <div>Avg attempts: {archive.avg_attempts_on_success.toFixed(2)}</div>
                                         <div>Runs: {archive.run_count}</div>

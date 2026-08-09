@@ -14,6 +14,7 @@ Or with glob:
 
 import argparse
 import json
+import os
 import sys
 import glob as glob_module
 from datetime import datetime
@@ -54,6 +55,7 @@ def merge_benchmarks(worker_paths: list[str], output_path: str) -> dict:
     total_successes = sum(w["total_successes"] for w in workers)
     total_success_exact = sum(w.get("total_success_exact", 0) for w in workers)
     total_success_extractor = sum(w.get("total_success_extractor", 0) for w in workers)
+    total_access_granted = sum(w.get("total_access_granted", 0) for w in workers)
 
     # Top-K metrics
     total_top1 = sum(w.get("top1_success", 0) for w in workers)
@@ -139,6 +141,7 @@ def merge_benchmarks(worker_paths: list[str], output_path: str) -> dict:
         "total_successes": total_successes,
         "total_success_exact": total_success_exact,
         "total_success_extractor": total_success_extractor,
+        "total_access_granted": total_access_granted,
         "total_rounds": total_rounds,
         # Top-K metrics
         "top1_success": total_top1,
@@ -191,6 +194,7 @@ def merge_benchmarks(worker_paths: list[str], output_path: str) -> dict:
     print(f"  Total Successes:  {total_successes}/{total_rounds}")
     print(f"  Generator Hit:    {total_success_exact}/{total_rounds}")
     print(f"  Extractor Hit:    {total_success_extractor}/{total_rounds}")
+    print(f"  Access Granted:   {total_access_granted}/{total_rounds}")
 
     print(f"\n📊 TOP-K SUCCESS METRICS")
     print(f"{'=' * 60}")
@@ -244,9 +248,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # Expand glob patterns
+    # Expand glob patterns.
+    # IMPORTANT: a path that already resolves to an existing file is used
+    # verbatim — we do NOT re-glob it. Benchmark output directories embed the
+    # dataset slice as a literal (e.g. "..._Llama3-[1000:1000]_..."), and
+    # glob.glob() would misread those brackets as a POSIX character class,
+    # yielding zero matches even though the file exists. So: existing-file
+    # args pass through untouched; only non-file args are treated as glob
+    # patterns. This works for both invocation styles — fully shell-expanded
+    # literal paths (argv already resolved) and unexpanded patterns.
     expanded_paths = []
     for pattern in args.worker_results:
+        if os.path.isfile(pattern):
+            expanded_paths.append(pattern)
+            continue
         matched = glob_module.glob(pattern)
         if matched:
             expanded_paths.extend(matched)

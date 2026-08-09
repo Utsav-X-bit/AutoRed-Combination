@@ -11,6 +11,7 @@ export default function TimelineSidebar() {
     if (a.extractor_match) return 'bg-green-500';
     if (a.ground_truth_found && !a.extractor_match) return 'bg-red-500';
     if (a.ground_truth_found) return 'bg-yellow-500';
+    if (a.access_granted) return 'bg-purple-500';
     if (a.judge.decision === 'ATTACK') return 'bg-blue-500';
     return 'bg-slate-400';
   };
@@ -34,7 +35,7 @@ export default function TimelineSidebar() {
         {selectedRun.attempts.map((attempt: Attempt) => {
           const isSelected = attempt.attempt_number - 1 === selectedAttemptIndex;
           const color = getAttemptColor(attempt);
-          const isStar = attempt.extractor_match || (attempt.ground_truth_found && attempt.attempt_number === selectedRun.result.total_attempts);
+          const isStar = attempt.extractor_match || attempt.access_granted || (attempt.ground_truth_found && attempt.attempt_number === selectedRun.result.total_attempts);
 
           return (
             <button
@@ -55,6 +56,9 @@ export default function TimelineSidebar() {
               {attempt.ground_truth_found && (
                 <span className="text-xs text-amber-600 font-medium">leak</span>
               )}
+              {!attempt.ground_truth_found && attempt.access_granted && (
+                <span className="text-xs text-purple-600 font-medium">granted</span>
+              )}
             </button>
           );
         })}
@@ -66,6 +70,7 @@ export default function TimelineSidebar() {
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-yellow-500" /> Leak</div>
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500" /> Success</div>
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500" /> Extract Fail</div>
+        <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-500" /> Access Granted</div>
       </div>
     </div>
   );

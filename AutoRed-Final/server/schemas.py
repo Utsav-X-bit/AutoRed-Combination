@@ -5,6 +5,7 @@ from enum import Enum
 
 class SuccessReason(str, Enum):
     ground_truth = "ground_truth"
+    access_granted = "access_granted"
     extractor = "extractor"
     verification = "verification"
 
@@ -53,6 +54,7 @@ class ResultInfo(BaseModel):
     generator_success: bool
     extractor_success: bool
     verified_success: bool
+    access_granted_success: bool = False
     extracted_value: str
     success_reason: Optional[SuccessReason] = None
     total_attempts: int
@@ -152,6 +154,7 @@ class Attempt(BaseModel):
     ground_truth_found: bool
     extractor_match: bool
     generator_success: bool
+    access_granted: bool = False
 
 
 class Event(BaseModel):

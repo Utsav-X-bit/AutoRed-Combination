@@ -18,6 +18,7 @@ Schema:
         "ground_truth_leaked": bool,      # Was the access code in the response?
         "extractor_success": bool,        # Did the extractor find it?
         "verification_success": bool,     # Did verification confirm it?
+        "access_granted": bool,           # Did the victim say "access granted"?
         "access_code_type": str,          # TOKEN, PHRASE, SENTENCE, etc.
         "defense_complexity": str,        # easy, medium, hard
         "timestamp": str,                 # ISO timestamp
@@ -132,6 +133,7 @@ class SuccessesLogger:
                     ground_truth_leaked: bool = False,
                     extractor_success: bool = False,
                     verification_success: bool = False,
+                    access_granted: bool = False,
                     opening_defense: str = "",
                     closing_defense: str = "",
                     access_code: str = "",
@@ -149,6 +151,7 @@ class SuccessesLogger:
             "ground_truth_leaked": ground_truth_leaked,
             "extractor_success": extractor_success,
             "verification_success": verification_success,
+            "access_granted": access_granted,
             "access_code_type": classify_access_code(access_code),
             "defense_complexity": compute_defense_complexity(opening_defense, closing_defense),
             "timestamp": timestamp or datetime.now().isoformat(),
@@ -247,6 +250,7 @@ def post_process_results(results_dir: Path, logger: SuccessesLogger):
             # New benchmark schema
             run_success = (
                 result_section.get("ground_truth_success", False)
+                or result_section.get("access_granted_success", False)
                 or result_section.get("generator_success", False)
                 or result_section.get("verified_success", False)
             )
@@ -275,6 +279,7 @@ def post_process_results(results_dir: Path, logger: SuccessesLogger):
             attempt_gt_found = step.get("ground_truth_found", False)
             attempt_gen_success = step.get("generator_success", False)
             attempt_ext_match = step.get("extractor_match", False)
+            attempt_access_granted = step.get("access_granted", False)
 
             # Extractor success: check multiple possible keys across schemas
             ext_success = (
@@ -296,6 +301,7 @@ def post_process_results(results_dir: Path, logger: SuccessesLogger):
                 ground_truth_leaked=attempt_gt_found or attempt_gen_success,
                 extractor_success=ext_success,
                 verification_success=verification.get("success", False),
+                access_granted=attempt_access_granted,
                 opening_defense=opening,
                 closing_defense=closing,
                 access_code=access_code,
@@ -366,8 +372,10 @@ def view_successes():
     gt_leaked = sum(1 for s in successes if s["ground_truth_leaked"])
     ext_success = sum(1 for s in successes if s["extractor_success"])
     ver_success = sum(1 for s in successes if s["verification_success"])
+    ag_success = sum(1 for s in successes if s.get("access_granted"))
     print(f"\n  Success types:")
     print(f"    Ground truth leaked: {gt_leaked}  ({gt_leaked/len(successes)*100:.1f}%)")
+    print(f"    Access granted: {ag_success}  ({ag_success/len(successes)*100:.1f}%)")
     print(f"    Extractor success: {ext_success}  ({ext_success/len(successes)*100:.1f}%)")
     print(f"    Verification success: {ver_success}  ({ver_success/len(successes)*100:.1f}%)")
 

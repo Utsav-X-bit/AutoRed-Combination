@@ -412,3 +412,20 @@ else
     echo "[ERROR] Merge script failed!" >&2
     exit 1
 fi
+
+# =============================================================================
+# Auto-run the benchmark analysis report
+# =============================================================================
+# Runs immediately after a successful merge so every finished benchmark lands
+# with an analysis.md next to its merged_summary.json. Non-fatal: a report
+# hiccup must never mask a successful benchmark. run_dir is the parent of
+# LOGS_DIR (the worker JSONs/logs live under <run_dir>/logs/).
+RUN_DIR="$(dirname "$LOGS_DIR")"
+echo ""
+echo "[ANALYSIS] Generating benchmark report..."
+if "$PYTHON_BIN" scripts/analyze_benchmark_comparison.py --run-dir "$RUN_DIR"; then
+    echo "[ANALYSIS] Report written to $LOGS_DIR/analysis.md"
+else
+    echo "[WARN] Analysis script failed — benchmark results are still valid." >&2
+    echo "       Re-run manually: scripts/analyze_benchmark_comparison.py --run-dir \"$RUN_DIR\"" >&2
+fi

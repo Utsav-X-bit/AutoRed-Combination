@@ -122,6 +122,7 @@ export function normalizeAttempt(value: unknown, index = 0): Attempt {
     ground_truth_found: Boolean(raw.ground_truth_found),
     extractor_match: Boolean(raw.extractor_match),
     generator_success: Boolean(raw.generator_success),
+    access_granted: Boolean(raw.access_granted),
   };
 }
 
@@ -211,8 +212,9 @@ export function normalizeRun(value: unknown): AutoRedRun {
       generator_success: Boolean(result.generator_success),
       extractor_success: Boolean(result.extractor_success),
       verified_success: Boolean(result.verified_success),
+      access_granted_success: Boolean(result.access_granted_success),
       extracted_value: asString(result.extracted_value),
-      success_reason: ['ground_truth', 'extractor', 'verification'].includes(result.success_reason)
+      success_reason: ['ground_truth', 'access_granted', 'extractor', 'verification'].includes(result.success_reason)
         ? result.success_reason : null,
       total_attempts: asNumber(result.total_attempts, attempts.length),
     },

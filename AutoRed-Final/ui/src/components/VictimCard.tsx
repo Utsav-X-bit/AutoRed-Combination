@@ -31,6 +31,9 @@ export default function VictimCard({ attempt, accessCode }: { attempt: Attempt; 
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${attempt.ground_truth_found ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>
             GT Found: {attempt.ground_truth_found ? '✓ YES' : '✗ NO'}
           </span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${attempt.access_granted ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>
+            Access Granted: {attempt.access_granted ? '✓ YES' : '✗ NO'}
+          </span>
         </div>
       </div>
 

@@ -137,6 +137,7 @@ def analyze(path):
     print(f"    Top-3 Success:    {data.get('top3_success', 0)}")
     print(f"    Top-5 Success:    {data.get('top5_success', 0)}")
     print(f"    Verified:         {data.get('verified_success', 0)}")
+    print(f"    Access Granted:   {data.get('total_access_granted', 0)}")
     
     # ── Comparison with previous benchmark ──
     print(f"\n📊 COMPARISON: vLLM vs Previous (HuggingFace) Benchmark")

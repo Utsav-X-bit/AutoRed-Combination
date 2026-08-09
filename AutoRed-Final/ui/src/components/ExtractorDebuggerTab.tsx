@@ -12,11 +12,14 @@ export default function ExtractorDebuggerTab() {
   const attempt = selectedRun.attempts[selectedAttemptIndex];
   if (!attempt) return null;
 
-  const { extractor, ground_truth_found, extractor_match } = attempt;
+  const { extractor, ground_truth_found, extractor_match, access_granted } = attempt;
   const accessCode = selectedRun.scenario.access_code;
 
   const failureReason = (() => {
     if (extractor_match) return null;
+    // An access-granted win is a separate success channel — the extractor did not fail,
+    // the run simply won without recovering the access code.
+    if (access_granted) return null;
     if (!ground_truth_found) return "No ground truth leak in victim output";
     if (extractor.ranked_candidates.some((c: { value: string }) => c.value.toLowerCase() === accessCode.toLowerCase())) {
       return "Access code was in candidates but not selected as best";
@@ -166,10 +169,12 @@ export default function ExtractorDebuggerTab() {
 
           <div>
             <p className="text-xs font-medium text-slate-700 mb-1">Layer 6: Final Selection</p>
-            <div className={`p-3 rounded-lg border ${extractor_match ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+            <div className={`p-3 rounded-lg border ${extractor_match ? 'bg-green-50 border-green-200' : access_granted ? 'bg-purple-50 border-purple-200' : 'bg-red-50 border-red-200'}`}>
               <div className="flex items-center justify-between">
                 <span className="font-mono font-bold whitespace-pre-wrap break-words">{extractor.best_candidate || 'NONE'}</span>
-                {extractor_match ? <span className="text-green-600 font-bold">✓ Correct</span> : <span className="text-red-600 font-bold">✗ Wrong</span>}
+                {extractor_match ? <span className="text-green-600 font-bold">✓ Correct</span>
+                  : access_granted ? <span className="text-purple-600 font-bold">✓ Access Granted</span>
+                  : <span className="text-red-600 font-bold">✗ Wrong</span>}
               </div>
             </div>
           </div>

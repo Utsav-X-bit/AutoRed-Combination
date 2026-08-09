@@ -55,14 +55,17 @@ export function buildPlannerState(run: AutoRedRun, attemptIndex: number): Planne
         ? 'extractor success'
         : previous.ground_truth_found
           ? 'ground truth leaked'
-          : previous.verification.success
-            ? 'verification success'
-            : 'no leak'
+          : previous.access_granted
+            ? 'access granted'
+            : previous.verification.success
+              ? 'verification success'
+              : 'no leak'
       : 'start of run',
-    success_so_far: priorAttempts.filter((item) => item.ground_truth_found || item.extractor_match || item.verification.success).length,
+    success_so_far: priorAttempts.filter((item) => item.ground_truth_found || item.access_granted || item.extractor_match || item.verification.success).length,
     attempts_so_far: priorAttempts.length,
     leak_seen: priorAttempts.some((item) => item.ground_truth_found),
     verified_seen: priorAttempts.some((item) => item.verification.success),
+    access_granted_seen: priorAttempts.some((item) => item.access_granted),
   };
 }
 
@@ -84,7 +87,7 @@ export function attemptTimeline(run: AutoRedRun) {
     parsed_plan: parsePlanText(attempt.generator.plan_raw),
     time_ms: attempt.attempt_time_ms,
     timestamp: attempt.timestamp,
-    success: attempt.ground_truth_found || attempt.extractor_match || attempt.verification.success,
+    success: attempt.ground_truth_found || attempt.access_granted || attempt.extractor_match || attempt.verification.success,
     state: buildPlannerState(run, index),
   }));
 }

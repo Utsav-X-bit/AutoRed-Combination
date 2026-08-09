@@ -14,7 +14,7 @@ export default function AttackEvolutionTab() {
     return {
       strategy: s,
       count: sAttempts.length,
-      successes: sAttempts.filter(a => a.ground_truth_found).length,
+      successes: sAttempts.filter(a => a.ground_truth_found || a.access_granted).length,
       leaks: sAttempts.filter(a => a.extractor_match).length,
       avgTokens: Math.round(sAttempts.reduce((sum, a) => sum + a.generator.output_tokens, 0) / sAttempts.length),
     };
@@ -44,6 +44,8 @@ export default function AttackEvolutionTab() {
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
                   a.ground_truth_found
                     ? 'bg-green-100 text-green-700'
+                    : a.access_granted
+                    ? 'bg-purple-100 text-purple-700'
                     : a.extractor_match
                     ? 'bg-green-100 text-green-700'
                     : 'bg-slate-100 text-slate-600'

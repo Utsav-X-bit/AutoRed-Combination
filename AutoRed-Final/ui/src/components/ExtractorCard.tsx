@@ -28,7 +28,7 @@ function CandidateList({ candidates, tone }: { candidates: string[]; tone: 'blue
 
 export default function ExtractorCard({ attempt }: { attempt: Attempt }) {
   const { extractor } = attempt;
-  const isWrong = extractor.best_candidate && attempt.ground_truth_found && !attempt.extractor_match;
+  const isWrong = extractor.best_candidate && attempt.ground_truth_found && !attempt.extractor_match && !attempt.access_granted;
   const verifiedCandidate = extractor.verified_candidate;
   const lastTrace = extractor.verification_traces[extractor.verification_traces.length - 1];
   const successfulTrace = extractor.verification_traces.find((trace) => trace.success);
@@ -43,6 +43,11 @@ export default function ExtractorCard({ attempt }: { attempt: Attempt }) {
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${attempt.extractor_match ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
           Match: {attempt.extractor_match ? '✓ YES' : '✗ NO'}
         </span>
+        {attempt.access_granted && (
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">
+            Access Granted ✓
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
@@ -160,6 +165,7 @@ export default function ExtractorCard({ attempt }: { attempt: Attempt }) {
           <span className="font-mono font-bold text-slate-900 whitespace-pre-wrap break-words">{extractor.best_candidate || 'NONE'}</span>
           {isWrong && <span className="text-red-600 text-sm font-bold">❌ Wrong Selection</span>}
           {attempt.extractor_match && <span className="text-green-600 text-sm font-bold">✓ Correct</span>}
+          {attempt.access_granted && <span className="text-purple-600 text-sm font-bold">✓ Access Granted</span>}
         </div>
       </div>
 

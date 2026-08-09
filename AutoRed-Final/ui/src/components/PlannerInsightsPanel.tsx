@@ -86,6 +86,7 @@ export default function PlannerInsightsPanel({ run, selectedAttemptIndex }: Prop
             <Field label="Attempts" value={`${state.attempts_so_far}`} />
             <Field label="Leaked so far" value={state.leak_seen ? 'yes' : 'no'} />
             <Field label="Verified so far" value={state.verified_seen ? 'yes' : 'no'} />
+            <Field label="Access granted so far" value={state.access_granted_seen ? 'yes' : 'no'} />
           </div>
           <div className="mt-3 text-xs text-slate-500">
             The state is derived from run history when the runtime does not emit an explicit planner state snapshot.

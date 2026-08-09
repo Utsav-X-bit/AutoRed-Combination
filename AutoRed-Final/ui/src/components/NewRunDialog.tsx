@@ -46,11 +46,11 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
 
         if (data.type === 'attempt_update') {
           const attemptNum = data.attempt.attempt_number;
-          console.log(`[NewRun WS] Attempt #${attemptNum} received, ground_truth_found=${data.attempt.ground_truth_found}`);
+          console.log(`[NewRun WS] Attempt #${attemptNum} received, ground_truth_found=${data.attempt.ground_truth_found}, access_granted=${data.attempt.access_granted}`);
           setCurrentAttempt(attemptNum);
           setTotalAttempts(attemptNum);
-          if (data.attempt.ground_truth_found) {
-            console.log('[NewRun WS] ✓ Ground truth found in this attempt!');
+          if (data.attempt.ground_truth_found || data.attempt.access_granted) {
+            console.log('[NewRun WS] ✓ Success signal in this attempt (ground_truth_found or access_granted)!');
             setSuccess(true);
           }
         } else if (data.type === 'run_complete') {
@@ -62,10 +62,11 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
             setError((rawRun as { error: string }).error);
           } else {
             const run = rawRun as AutoRedRun;
-            console.log('[NewRun WS] Run complete - success:', run.result?.ground_truth_success, 'attempts:', run.result?.total_attempts);
+            console.log('[NewRun WS] Run complete - success:', run.result?.ground_truth_success, 'access_granted:', run.result?.access_granted_success, 'attempts:', run.result?.total_attempts);
             console.log('[NewRun WS] Run attempts array length:', run.attempts?.length);
             setSuccess(Boolean(
               run.result?.ground_truth_success
+              || run.result?.access_granted_success
               || run.result?.extractor_success
               || run.result?.verified_success
             ));
@@ -288,7 +289,7 @@ export default function NewRunDialog({ onClose, onSuccess }: NewRunDialogProps) 
             {success !== null && !error && (
               <div className={`rounded-lg p-4 text-center ${success ? 'bg-green-50' : 'bg-slate-50'}`}>
                 <p className={`text-lg font-bold ${success ? 'text-green-700' : 'text-slate-700'}`}>
-                  {success ? '✓ Success — Access Code Extracted' : '✗ Failed — Max Attempts Reached'}
+                  {success ? '✓ Success — Goal Achieved' : '✗ Failed — Max Attempts Reached'}
                 </p>
                 <p className="text-sm text-slate-500 mt-1">
                   Total attempts: {totalAttempts}

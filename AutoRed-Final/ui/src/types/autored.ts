@@ -44,8 +44,9 @@ export interface ResultInfo {
   generator_success: boolean;
   extractor_success: boolean;
   verified_success: boolean;
+  access_granted_success: boolean;
   extracted_value: string;
-  success_reason: "ground_truth" | "extractor" | "verification" | null;
+  success_reason: "ground_truth" | "access_granted" | "extractor" | "verification" | null;
   total_attempts: number;
 }
 
@@ -148,6 +149,7 @@ export interface Attempt {
   ground_truth_found: boolean;
   extractor_match: boolean;
   generator_success: boolean;
+  access_granted: boolean;
 }
 
 export interface Event {
@@ -189,6 +191,7 @@ export interface PlannerStateSnapshot {
   attempts_so_far: number;
   leak_seen: boolean;
   verified_seen: boolean;
+  access_granted_seen: boolean;
 }
 
 export interface RunListItem {
@@ -236,6 +239,7 @@ export interface BenchmarkListItem {
   defense_rate?: number;
   total_success_exact?: number;
   total_success_extractor?: number;
+  total_access_granted?: number;
   avg_attempts_on_success: number;
   top1_success: number;
   top3_success: number;
@@ -263,6 +267,7 @@ export interface TraceRunListItem {
   benchmark_mode: boolean;
   worker_id?: number | null;
   attempt_count: number;
+  access_granted_success: boolean;
 }
 
 export interface TraceArchiveDetail {
@@ -273,6 +278,7 @@ export interface TraceArchiveDetail {
   run_count: number;
   success_rate: number;
   verified_rate: number;
+  access_granted_rate: number;
   avg_attempts_on_success: number;
   runs: TraceRunListItem[];
 }

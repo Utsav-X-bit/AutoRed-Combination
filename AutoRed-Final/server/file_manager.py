@@ -14,7 +14,7 @@ BENCHMARK_DIR = RESULTS_DIR / "benchmark"          # new results_layout.py tree
 def _overall_success(result: Dict[str, Any]) -> bool:
     return any(
         bool(result.get(key))
-        for key in ("ground_truth_success", "extractor_success", "verified_success")
+        for key in ("ground_truth_success", "access_granted_success", "extractor_success", "verified_success")
     )
 
 
@@ -142,6 +142,7 @@ def _run_metadata_from_file(path: Path) -> Dict[str, Any]:
         "scenario_id": normalized.get("experiment", {}).get("scenario_id", ""),
         "success": _overall_success(normalized.get("result", {})),
         "verified_success": bool(normalized.get("result", {}).get("verified_success")),
+        "access_granted_success": bool(normalized.get("result", {}).get("access_granted_success")),
         "total_attempts": normalized.get("result", {}).get("total_attempts", 0),
         "access_code": normalized.get("scenario", {}).get("access_code", ""),
         "generator": normalized.get("models", {}).get("generator", {}).get("name", ""),
@@ -156,12 +157,14 @@ def _summarize_trace_archive(path: Path) -> Dict[str, Any]:
     runs = []
     total_successes = 0
     verified_successes = 0
+    access_granted_successes = 0
     total_attempts = 0
     for run_file in sorted(path.glob("run_*.json")):
         meta = _run_metadata_from_file(run_file)
         runs.append(meta)
         total_successes += int(meta["success"])
         verified_successes += int(meta["verified_success"])
+        access_granted_successes += int(meta.get("access_granted_success", False))
         total_attempts += int(meta["total_attempts"])
 
     run_count = len(runs)
@@ -173,6 +176,7 @@ def _summarize_trace_archive(path: Path) -> Dict[str, Any]:
         "run_count": run_count,
         "success_rate": (total_successes / run_count) if run_count else 0.0,
         "verified_rate": (verified_successes / run_count) if run_count else 0.0,
+        "access_granted_rate": (access_granted_successes / run_count) if run_count else 0.0,
         "avg_attempts_on_success": (
             total_attempts / total_successes if total_successes else 0.0
         ),
@@ -197,6 +201,7 @@ def _benchmark_summary_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "total_rounds": data.get("total_rounds", 0),
         "total_successes": data.get("total_successes", 0),
+        "total_access_granted": data.get("total_access_granted", 0),
         "verified_success": data.get("verified_success", 0),
         "success_rate": data.get("success_rate", 0.0),
         "avg_attempts_on_success": data.get("avg_attempts_on_success", 0.0),

@@ -60,7 +60,7 @@ def level1_defense_type(runs):
     stats = defaultdict(lambda: {"total": 0, "success": 0, "verified": 0})
     for r in runs:
         dt = r["scenario"].get("defense_type", "unknown")
-        success = r["result"].get("ground_truth_success") or r["result"].get("generator_success", False)
+        success = r["result"].get("ground_truth_success") or r["result"].get("access_granted_success", False) or r["result"].get("generator_success", False)
         verified = r["result"].get("verified_success", False)
         stats[dt]["total"] += 1
         if success:
@@ -84,7 +84,7 @@ def level2_access_code_type(runs):
     stats = defaultdict(lambda: {"total": 0, "success": 0, "verified": 0})
     for r in runs:
         act = r["scenario"].get("access_code_type", "UNKNOWN")
-        success = r["result"].get("ground_truth_success") or r["result"].get("generator_success", False)
+        success = r["result"].get("ground_truth_success") or r["result"].get("access_granted_success", False) or r["result"].get("generator_success", False)
         verified = r["result"].get("verified_success", False)
         stats[act]["total"] += 1
         if success:
@@ -127,10 +127,11 @@ def level3_planner_accuracy(runs):
         winning_strategy = None
         for a in attempts:
             gt = a.get("ground_truth_found", False)
+            ag = a.get("access_granted", False)
             vs = a.get("verification", {})
             if isinstance(vs, dict):
                 vs = vs.get("success", False)
-            if gt or vs:
+            if gt or ag or vs:
                 winning_strategy = a["generator"]["strategy"]
                 break
 
@@ -207,7 +208,7 @@ def level4_primitive_combinations(runs):
             prims = detect_primitives(attack)
             if len(prims) < 2:
                 continue
-            success = a.get("ground_truth_found", False) or (
+            success = a.get("ground_truth_found", False) or a.get("access_granted", False) or (
                 isinstance(a.get("verification"), dict) and a["verification"].get("success", False)
             )
             # Track top pairs
@@ -281,7 +282,7 @@ def level6_failure_attribution(runs):
     total_failed = 0
 
     for r in runs:
-        if r["result"].get("ground_truth_success") or r["result"].get("verified_success"):
+        if r["result"].get("ground_truth_success") or r["result"].get("access_granted_success") or r["result"].get("verified_success"):
             continue  # skip successes
         attempts = r["attempts"]
 
@@ -309,7 +310,7 @@ def level6_failure_attribution(runs):
             attr["other"] += 1
 
     lines = []
-    lines.append(f"- **Total failed runs (no GT/verified success):** {total_failed}")
+    lines.append(f"- **Total failed runs (no GT/access-granted/verified success):** {total_failed}")
     lines.append("")
     lines.append(table(
         ["Attribution", "Count", "% of Failures"],
@@ -331,13 +332,13 @@ def level7_transition_graph(runs):
             curr = attempts[i]
             prev_strategy = prev["generator"]["strategy"]
             curr_strategy = curr["generator"]["strategy"]
-            prev_success = prev.get("ground_truth_found", False) or (
+            prev_success = prev.get("ground_truth_found", False) or prev.get("access_granted", False) or (
                 isinstance(prev.get("verification"), dict) and prev["verification"].get("success", False)
             )
             if prev_success:
                 continue  # only look at transitions after a failure
 
-            curr_success = curr.get("ground_truth_found", False) or (
+            curr_success = curr.get("ground_truth_found", False) or curr.get("access_granted", False) or (
                 isinstance(curr.get("verification"), dict) and curr["verification"].get("success", False)
             )
 
@@ -390,7 +391,7 @@ def level8_defense_strategy_matrix(runs):
         for a in r["attempts"]:
             s = a["generator"]["strategy"]
             all_strategies.add(s)
-            success = a.get("ground_truth_found", False) or (
+            success = a.get("ground_truth_found", False) or a.get("access_granted", False) or (
                 isinstance(a.get("verification"), dict) and a["verification"].get("success", False)
             )
             matrix[dt][s]["total"] += 1
@@ -431,7 +432,7 @@ def level9_primitive_defense_matrix(runs):
         for a in r["attempts"]:
             attack = a["generator"].get("generated_attack", "")
             prims = detect_primitives(attack)
-            success = a.get("ground_truth_found", False) or (
+            success = a.get("ground_truth_found", False) or a.get("access_granted", False) or (
                 isinstance(a.get("verification"), dict) and a["verification"].get("success", False)
             )
             for p in prims:
@@ -464,7 +465,7 @@ def level10_primitive_sequence(runs):
     for r in runs:
         strats = [a["generator"]["strategy"] for a in r["attempts"]]
         seq = " → ".join(strats[:3])  # first 3 strategy choices
-        success = r["result"].get("ground_truth_success") or r["result"].get("verified_success", False)
+        success = r["result"].get("ground_truth_success") or r["result"].get("access_granted_success", False) or r["result"].get("verified_success", False)
         seq_stats[seq]["total"] += 1
         if success:
             seq_stats[seq]["success"] += 1
@@ -534,7 +535,7 @@ def level12_oracle_agreement(runs):
         # Count successes per strategy
         strat_wins = Counter()
         for a in attempts:
-            success = a.get("ground_truth_found", False) or (
+            success = a.get("ground_truth_found", False) or a.get("access_granted", False) or (
                 isinstance(a.get("verification"), dict) and a["verification"].get("success", False)
             )
             if success:

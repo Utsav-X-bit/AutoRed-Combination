@@ -166,6 +166,7 @@ def main():
             
             # Determine success fields
             gt_success = "Yes" if result.get('ground_truth_success', False) else "No"
+            ag_success = "Yes" if result.get('access_granted_success', False) else "No"
             ver_success = "Yes" if result.get('verified_success', False) else "No"
             
             # Failure attribution
@@ -176,7 +177,7 @@ def main():
                 if fail_reason == 'Failed':
                     # Determine reason
                     # If victim response never leaked access code
-                    if not result.get('ground_truth_success', False):
+                    if not result.get('ground_truth_success', False) and not result.get('access_granted_success', False):
                         fail_reason = "Victim never leaked"
                     else:
                         # leaked but not verified
@@ -185,13 +186,14 @@ def main():
                 fail_reason = f"Success: {fail_reason}"
                 
             # If success, overwrite
-            if result.get('verified_success', False) or result.get('ground_truth_success', False):
+            if result.get('verified_success', False) or result.get('ground_truth_success', False) or result.get('access_granted_success', False):
                 fail_reason = "Success"
 
             records.append({
                 'Run': run_id,
                 'Attempts No.': result.get('total_attempts', 0),
                 'Success Rate[Ground Truth Success] Yes/NO': gt_success,
+                'Access Granted Yes/No': ag_success,
                 'Verified Success Yes/No': ver_success,
                 'Victim Model ': models.get('victim', {}).get('name', 'UNKNOWN'),
                 'Access code Type ': access_code_type,

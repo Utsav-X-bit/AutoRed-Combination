@@ -14,7 +14,7 @@ export default function ModelHeatmapTab() {
     attempt: a.attempt_number,
     time: a.attempt_time_ms,
     strategy: a.generator.strategy,
-    success: a.ground_truth_found ? 1 : 0,
+    success: (a.ground_truth_found || a.access_granted) ? 1 : 0,
   }));
 
   // Judge confidence trend
