@@ -260,7 +260,13 @@ fi
 # ---------------------------------------------------------------------------
 # Merge or replace into results/
 # ---------------------------------------------------------------------------
-echo "[3/4] ${MODE^} into ${RESULTS_DIR}"
+# bash 3.2 (macOS default) does not support ${MODE^} case-modification; use
+# an explicit ternary so the script runs on both macOS bash 3.2 and Linux bash 4+.
+if [[ "$MODE" == "merge" ]]; then
+  echo "[3/4] Merge into ${RESULTS_DIR}"
+else
+  echo "[3/4] Replace into ${RESULTS_DIR}"
+fi
 
 # Helper: apply merge or replace for one top-level tree (e.g. "results", "results_bak")
 apply_tree() {
@@ -295,7 +301,11 @@ apply_tree "results"
 # results_bak/ is huge and rarely in a benchmark archive, but handle it if present.
 apply_tree "results_bak"
 
-echo "[4/4] Done. ${MODE^} complete."
+if [[ "$MODE" == "merge" ]]; then
+  echo "[4/4] Done. Merge complete."
+else
+  echo "[4/4] Done. Replace complete."
+fi
 echo "      results/ now contains: $(find "$RESULTS_DIR" -type f 2>/dev/null | wc -l) files"
 echo
 echo "Local zip was in a temp dir (auto-removed). Drive still holds: ${REMOTE_PATH}"
