@@ -112,14 +112,36 @@ ATTEMPTS=20
 # extract_batch — the two highest-volume LLM calls in the hot loop — so it gets
 # the larger share. The shared LoRA base (planner+generator) only sees
 # ≤batch_size prompts per round and needs far less KV-cache headroom.
-# victim 0.50 + shared 0.44 = 0.94 total — deliberately under the prior 0.98 to
-# reserve ~1.5 GiB (0.04×39GiB) for NLLB-200-distilled-600M on the GPU. NLLB TL
-# moved off CPU (the dominant non-LLM cost in the fallback tail); it runs in
-# fp16 (~1.4 GiB incl. activations) in the freed slab instead of starving the
-# GPU with seconds/call CPU beam-search. AUTORED_TL_DEVICE=cpu reverts TL to
-# CPU if the slab is ever needed back. Do NOT raise shared above 0.44 while
-# mutation fallback is on — that would push NLLB back toward OOM.
-GPU_MEMORY_UTILIZATION=0.50
+#
+# Three memory levers (worker defaults, overridable via env/CLI) free ~2.5-3
+# GiB/GPU *inside* the vLLM KV pools (fp8 halves per-token KV; max_num_seqs=32
+# stops oversubscription; chunked prefill bounds the activation peak). That
+# freed KV room lets more blocks fit at the same util fraction — but it does
+# NOT free GPU memory for the non-vLLM models. The auxiliary models (judge
+# DistilBERT, access-code predictor DistilBERT, ranker, strategy_predictor, RAG
+# layer, and NLLB-200 TL) all live OUTSIDE both vLLM budgets and must fit in the
+# GPU memory the util fractions leave unreserved.
+#
+# OOM lesson (2026-08-10 run, worker_0.log): at 0.50+0.46=0.96 total util the two
+# vLLM engines reserved 37.81 GiB, leaving only 1.57 GiB — and the judge
+# DistilBERT OOM'd allocating 38 MiB during predict_batch at 0% progress (NLLB
+# hadn't even loaded yet). The aux models alone need ~1.6 GiB; NLLB adds ~1.4
+# GiB; batch-inference activations need headroom on top. 0.96 (and the 0.98
+# default before it) was never safe — the prior "0.98 is safe" claim was a
+# prediction that the first real run disproved.
+#
+# New budget: victim 0.46 + shared 0.44 = 0.90 total → 3.94 GiB unreserved slab.
+#   • ~1.6 GiB  → aux models (judge + predictor + ranker + strategy + RAG)
+#   • ~1.4 GiB  → NLLB-200-distilled-600M fp16 on GPU (AUTORED_TL_DEVICE=gpu),
+#                 moved off CPU where beam-search was the dominant non-LLM cost
+#   • ~0.9 GiB  → activation/overflow margin during batch inference
+# Victim KV = 39.38×0.46 − 14.96 = 3.15 GiB fp8 (29% cut from the 0.50 era's
+# 4.42 GiB — keeps the RECOMPUTE preemption storm fixed). Shared KV =
+# 39.38×0.44 − 16.41 = 0.92 GiB fp8 (ample for ≤256-token planner prompts in
+# ≤50 batches). The shared model's 16.41 GiB weights are the binding floor —
+# shared_util much below 0.44 leaves no KV at all. AUTORED_TL_DEVICE=cpu reverts
+# NLLB to CPU if a future larger aux model needs the slab back.
+GPU_MEMORY_UTILIZATION=0.46
 SHARED_GPU_MEMORY_UTILIZATION=0.44
 START_IDX=""
 SEED=7
@@ -129,6 +151,21 @@ COOPERATIVE_SEEDING=1
 COOPERATIVE_N=""
 PLANNER_TEMP_ESCALATION=0.0
 DEDUP_SCENARIOS=0
+# Three memory levers + NLLB device (worker reads these via env; forwarding as
+# CLI flags below mirrors them for explicitness/A-B). Defaults match the worker
+# defaults, so production runs need no extra flags — these are the A/B knobs.
+# fp8_e5m2 (not plain "fp8"/E4M3): A100 40GB = Ampere (sm_80) has no fp8 tensor
+# cores. vLLM "fp8" → fp8e4m3 → Triton fp8e4nv kernel, which only compiles on
+# Hopper/Ada. The 2026-08-10 run crashed at first planner generate with
+# "type fp8e4nv not supported in this architecture. The supported fp8 dtypes
+# are ('fp8e4b15','fp8e5')". "fp8_e5m2" → torch.float8_e5m2 → Triton fp8e5,
+# which IS supported on Ampere. Same 8-bit footprint/accuracy as E4M3.
+# Revert to "fp8" only on Hopper/Ada; "auto" disables fp8 (native fp16).
+KV_CACHE_DTYPE="fp8_e5m2"
+VICTIM_MAX_NUM_SEQS=32
+SHARED_MAX_NUM_SEQS=32
+DISABLE_CHUNKED_PREFILL=0
+TL_DEVICE="gpu"
 OUTPUT_DIR=""
 NUM_GPUS=4
 
@@ -155,9 +192,21 @@ OPTIONS (all optional; defaults shown)
   --dataset-path PATH          Defense dataset jsonl
   --dataset-size N             Scenarios to sample (default 1000)
   --attempts N                 Max attack attempts per scenario (default 20)
-  --gpu-memory-utilization F   victim vLLM GPU mem fraction (default 0.50)
+  --gpu-memory-utilization F   victim vLLM GPU mem fraction (default 0.46)
   --shared-gpu-memory-utilization F  shared planner/generator vLLM GPU mem
-                               fraction (default 0.48)
+                               fraction (default 0.44)
+                               victim+shared MUST total ≤ ~0.90 to leave a real
+                               slab for aux models (judge/predictor/ranker/
+                               NLLB); 0.96-0.98 OOMs the judge DistilBERT.
+  --kv-cache-dtype D           KV cache dtype: fp8_e5m2 (default, Ampere-safe),
+                               fp8/fp8_e4m3 (Hopper/Ada only), or auto (fp16 A/B).
+                               fp8 halves per-token KV memory; <1% output
+                               impact, argmax tokens unaffected.
+  --victim-max-num-seqs N      Cap victim admitted seqs/batch (default 32; 0=vLLM default)
+  --shared-max-num-seqs N      Cap shared admitted seqs/batch (default 32; 0=vLLM default)
+  --disable-chunked-prefill    Turn off chunked prefill (on by default; A/B only)
+  --tl-device DEV              NLLB translation device: gpu (default) or cpu.
+                               gpu runs NLLB fp16 in the freed slab; cpu reverts.
   --start-idx N                Zero-based start index (ordered slice);
                                omit for random sampling
   --seed N                     Seed for sampling / mutation fallback (default 7)
@@ -201,6 +250,11 @@ while [[ $# -gt 0 ]]; do
     --attempts)                ATTEMPTS="$2"; shift 2 ;;
     --gpu-memory-utilization)   GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
     --shared-gpu-memory-utilization) SHARED_GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
+    --kv-cache-dtype)           KV_CACHE_DTYPE="$2"; shift 2 ;;
+    --victim-max-num-seqs)      VICTIM_MAX_NUM_SEQS="$2"; shift 2 ;;
+    --shared-max-num-seqs)      SHARED_MAX_NUM_SEQS="$2"; shift 2 ;;
+    --disable-chunked-prefill)  DISABLE_CHUNKED_PREFILL=1; shift ;;
+    --tl-device)                TL_DEVICE="$2"; shift 2 ;;
     --start-idx)               START_IDX="$2"; shift 2 ;;
     --seed)                    SEED="$2"; shift 2 ;;
     --mutation-fallback)       MUTATION_FALLBACK=1; shift ;;
@@ -227,6 +281,15 @@ fi
 if [[ "$MUTATION_FALLBACK" -eq 1 ]]; then
   export AUTORED_MUTATION_FALLBACK=1
 fi
+
+# Three memory levers + NLLB device — exported so the worker (and any submodule
+# that reads env, e.g. JailGuard mutators for AUTORED_TL_DEVICE) pick them up
+# even without the CLI flags. The CLI flags below override these at the worker.
+export AUTORED_KV_CACHE_DTYPE="$KV_CACHE_DTYPE"
+export AUTORED_VICTIM_MAX_NUM_SEQS="$VICTIM_MAX_NUM_SEQS"
+export AUTORED_SHARED_MAX_NUM_SEQS="$SHARED_MAX_NUM_SEQS"
+export AUTORED_DISABLE_CHUNKED_PREFILL="$DISABLE_CHUNKED_PREFILL"
+export AUTORED_TL_DEVICE="$TL_DEVICE"
 
 # -----------------------------------------------------------------------------
 # Resolve the logs directory via the shared results_layout module so the
@@ -274,6 +337,8 @@ echo "Victim       : $VICTIM_MODEL_ID"
 echo "Dataset      : $DATASET_PATH (size $DATASET_SIZE)"
 echo "Attempts     : $ATTEMPTS"
 echo "GPU mem util : victim=$GPU_MEMORY_UTILIZATION shared=$SHARED_GPU_MEMORY_UTILIZATION"
+echo "KV cache    : $KV_CACHE_DTYPE | max_seqs victim=$VICTIM_MAX_NUM_SEQS shared=$SHARED_MAX_NUM_SEQS | chunked_prefill=$([ "$DISABLE_CHUNKED_PREFILL" -eq 1 ] && echo off || echo on)"
+echo "NLLB device : $TL_DEVICE"
 echo "Start idx    : ${START_IDX:-<random sampling>}"
 echo "Seed         : $SEED"
 if [[ "$MUTATION_FALLBACK" -eq 1 ]]; then
@@ -320,6 +385,9 @@ for WORKER_ID in $(seq 0 $((NUM_GPUS - 1))); do
         --attempts "$ATTEMPTS"
         --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
         --shared-gpu-memory-utilization "$SHARED_GPU_MEMORY_UTILIZATION"
+        --kv-cache-dtype "$KV_CACHE_DTYPE"
+        --victim-max-num-seqs "$VICTIM_MAX_NUM_SEQS"
+        --shared-max-num-seqs "$SHARED_MAX_NUM_SEQS"
         --seed "$SEED"
         --max-fallback-rounds "$MAX_FALLBACK_ROUNDS"
     )
@@ -348,6 +416,11 @@ for WORKER_ID in $(seq 0 $((NUM_GPUS - 1))); do
     fi
     if [[ "$DEDUP_SCENARIOS" -eq 1 ]]; then
         WORKER_ARGS+=(--dedup-scenarios)
+    fi
+    # Chunked prefill is on by default; only forward the override when disabled
+    # (A/B comparison). The worker treats the flag's absence as "on".
+    if [[ "$DISABLE_CHUNKED_PREFILL" -eq 1 ]]; then
+        WORKER_ARGS+=(--disable-chunked-prefill)
     fi
 
     # Launch worker on a specific GPU. Use env so CUDA_VISIBLE_DEVICES is set

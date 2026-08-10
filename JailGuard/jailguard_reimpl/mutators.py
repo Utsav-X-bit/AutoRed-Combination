@@ -49,7 +49,7 @@ def _nllb_device():
         return "cpu"
     forced = os.environ.get("AUTORED_TL_DEVICE", "").strip().lower()
     if forced in ("cpu", "0", "cuda:0", "gpu"):
-        if forced in ("0", "gpu"):
+        if forced in ("0", "gpu", "cuda:0"):
             return "cuda:0"
         return "cpu"
     if torch.cuda.is_available():
