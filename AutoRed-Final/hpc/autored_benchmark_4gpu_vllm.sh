@@ -43,6 +43,16 @@
 #   --no-cooperative-seeding     Disable cooperative seeding
 #   --cooperative-n N            Best-of-N cap on cooperative seeds (8..12)
 #   --planner-temp-escalation F  Raise planner temp to F when stuck (0.0 = off)
+#   --dedup-scenarios            Drop true-duplicate scenarios (identical prompt
+#                                AND access code) from the pool before slicing.
+#                                Off by default; enable for model evaluation.
+#   --update-kb MODE             KB/RAG write-path mode: off (A/B off-arm),
+#                                run (default, safe append-only), benchmark, all.
+#                                Also set via AUTORED_UPDATE_KB env var.
+#   --no-kb-guidance             A/B off-arm: short-circuit the KB/RAG read path
+#                                (no strategy guidance / RAG exemplars injected).
+#                                Use with --update-kb off to reproduce the
+#                                pre-reconnection baseline. Default off.
 #   --output-dir DIR             Results characteristics dir
 #                                (default results/benchmark/batched_<rounds>r_<gpus>gpu)
 #   --num-gpus N                 Workers to launch (default 4)
@@ -53,6 +63,9 @@
 #                          parent dir — portable across hosts).
 #   VLLM_USE_V1            vLLM engine selector (default 0, off — matches the
 #                          curated invocation).
+#   AUTORED_UPDATE_KB      KB/RAG write-path mode (default run; see --update-kb).
+#                          Exported so the worker picks it up even without the
+#                          CLI flag; the CLI flag overrides it at the worker.
 # =============================================================================
 
 set -euo pipefail
@@ -151,6 +164,17 @@ COOPERATIVE_SEEDING=1
 COOPERATIVE_N=""
 PLANNER_TEMP_ESCALATION=0.0
 DEDUP_SCENARIOS=0
+# KB/RAG write-path + read-path A/B knobs (forwarded to the worker).
+# --update-kb: off|run|benchmark|all. "run" (default) = safe append-only
+#   per-run writes with Tier-1/2 success labeling + content-hash dedup, so
+#   writes cannot poison the stores. "off" disables all writes (A/B off-arm).
+#   "benchmark"/"all" also rebuild aggregate indices after the batch.
+# --no-kb-guidance: A/B off-arm — short-circuits _build_kb_guidance so no KB
+#   strategy guidance or RAG exemplars are injected into the planner/generator
+#   prompts. Use with --update-kb off to reproduce the pre-reconnection
+#   baseline. The worker also reads AUTORED_UPDATE_KB (exported below).
+UPDATE_KB="run"
+NO_KB_GUIDANCE=0
 # Three memory levers + NLLB device (worker reads these via env; forwarding as
 # CLI flags below mirrors them for explicitness/A-B). Defaults match the worker
 # defaults, so production runs need no extra flags — these are the A/B knobs.
@@ -222,6 +246,17 @@ OPTIONS (all optional; defaults shown)
                                AND access code) from the pool before slicing, so
                                --start-idx cuts a unique-problem benchmark. Off
                                by default; enable for model evaluation.
+  --update-kb MODE             KB/RAG write-path mode forwarded to the worker:
+                               off = disable all writes (A/B off-arm);
+                               run = safe append-only per-run writes (default);
+                               benchmark = also rebuild indices after the batch;
+                               all = run + benchmark. Also set via the
+                               AUTORED_UPDATE_KB env var.
+  --no-kb-guidance             A/B off-arm: short-circuit KB/RAG read path so no
+                               KB strategy guidance or RAG exemplars are injected
+                               into the planner/generator prompts. Use with
+                               --update-kb off to reproduce the pre-reconnection
+                               baseline. Default off (read path active).
   --output-dir DIR             Results characteristics dir
                                (default results/benchmark/batched_<rounds>r_<gpus>gpu)
   --num-gpus N                 Workers to launch (default 4)
@@ -232,6 +267,9 @@ ENV
                          parent dir — portable across hosts).
   VLLM_USE_V1            vLLM engine selector (default 0, off — matches the
                           curated invocation).
+  AUTORED_UPDATE_KB      KB/RAG write-path mode (default run; see --update-kb).
+                          Exported so the worker picks it up without the CLI
+                          flag; the CLI flag overrides it at the worker.
 HELP
 }
 
@@ -264,6 +302,8 @@ while [[ $# -gt 0 ]]; do
     --cooperative-n)           COOPERATIVE_N="$2"; shift 2 ;;
     --planner-temp-escalation) PLANNER_TEMP_ESCALATION="$2"; shift 2 ;;
     --dedup-scenarios)         DEDUP_SCENARIOS=1; shift ;;
+    --update-kb)               UPDATE_KB="$2"; shift 2 ;;
+    --no-kb-guidance)          NO_KB_GUIDANCE=1; shift ;;
     --output-dir)              OUTPUT_DIR="$2"; shift 2 ;;
     --num-gpus)                NUM_GPUS="$2"; shift 2 ;;
     --help|-h)                 print_help; exit 0 ;;
@@ -290,6 +330,11 @@ export AUTORED_VICTIM_MAX_NUM_SEQS="$VICTIM_MAX_NUM_SEQS"
 export AUTORED_SHARED_MAX_NUM_SEQS="$SHARED_MAX_NUM_SEQS"
 export AUTORED_DISABLE_CHUNKED_PREFILL="$DISABLE_CHUNKED_PREFILL"
 export AUTORED_TL_DEVICE="$TL_DEVICE"
+
+# KB/RAG write-path mode — exported so the worker (which reads
+# AUTORED_UPDATE_KB as its --update-kb default) picks it up even without the
+# CLI flag below. The CLI flag below overrides this at the worker.
+export AUTORED_UPDATE_KB="$UPDATE_KB"
 
 # -----------------------------------------------------------------------------
 # Resolve the logs directory via the shared results_layout module so the
@@ -352,6 +397,12 @@ else
   echo "Coop seed    : off"
 fi
 echo "Planner temp : $PLANNER_TEMP_ESCALATION"
+echo "Update KB    : $UPDATE_KB (A/B off-arm: off)"
+if [[ "$NO_KB_GUIDANCE" -eq 1 ]]; then
+  echo "KB guidance  : OFF (--no-kb-guidance, A/B off-arm)"
+else
+  echo "KB guidance  : on (KB strategy + RAG exemplars injected)"
+fi
 echo "Output Dir   : $OUTPUT_DIR"
 echo "Logs Dir     : $LOGS_DIR"
 echo "============================================="
@@ -421,6 +472,16 @@ for WORKER_ID in $(seq 0 $((NUM_GPUS - 1))); do
     # (A/B comparison). The worker treats the flag's absence as "on".
     if [[ "$DISABLE_CHUNKED_PREFILL" -eq 1 ]]; then
         WORKER_ARGS+=(--disable-chunked-prefill)
+    fi
+
+    # KB/RAG write-path + read-path A/B knobs — forwarded to the worker.
+    # --update-kb is also exported via AUTORED_UPDATE_KB above, but the CLI
+    # flag overrides it explicitly so the per-worker mode is unambiguous.
+    # --no-kb-guidance has NO env fallback, so it MUST be a literal flag to
+    # take effect (short-circuits _build_kb_guidance to return "").
+    WORKER_ARGS+=(--update-kb "$UPDATE_KB")
+    if [[ "$NO_KB_GUIDANCE" -eq 1 ]]; then
+        WORKER_ARGS+=(--no-kb-guidance)
     fi
 
     # Launch worker on a specific GPU. Use env so CUDA_VISIBLE_DEVICES is set
