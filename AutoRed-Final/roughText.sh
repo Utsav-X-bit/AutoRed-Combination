@@ -14,8 +14,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./hpc/autored_benchmark_4gpu_vllm.sh \
   --dataset-size 5000 \
   --mutation-fallback \
   --max-fallback-rounds 2 \
-  --output-dir "results/benchmarks/Llama3-[20000:1000]_MutationFallback-[KB+RAG]_subset-8_$(date +%F_%H-%M-%S)_4g" \
-  --start-idx 20000 \
+  --output-dir "results/benchmarks/Llama3-[10000:1000]_MutationFallback-[KB+RAG]_subset-8_$(date +%F_%H-%M-%S)_4g" \
+  --start-idx 10000 \
   --seed 7 \
   --dedup-scenarios \
   "$@"

@@ -139,7 +139,8 @@ class KBUpdater:
 
         successes_added = 0
         failures_added = 0
-        duplicates_skipped = 0
+        duplicates_skipped = 0  # in-memory seen_keys hits
+        db_dedup_skipped = 0  # UNIQUE-index hits (cross-worker)
 
         with (
             open(self.successes_path, "a", encoding="utf-8") as sf,
@@ -201,7 +202,7 @@ class KBUpdater:
                     ff.write(json.dumps(record) + "\n")
                     failures_added += 1
 
-                self._insert_trajectory(
+                inserted = self._insert_trajectory(
                     run_id=run_id,
                     scenario_id=scenario_id,
                     defense_type=defense_type,
@@ -222,6 +223,12 @@ class KBUpdater:
                     source_file=source_file,
                     timestamp=timestamp,
                 )
+                if not inserted:
+                    # Cross-worker DB dedup hit: another worker already inserted this
+                    # dedup_key. The JSONL append above already succeeded (it is the
+                    # authoritative read-path source), so the record is preserved; the
+                    # DB simply keeps one canonical row. No crash, no data loss.
+                    db_dedup_skipped += 1
 
         self._db_commit()
 
@@ -229,7 +236,8 @@ class KBUpdater:
             print(
                 f"[KB] Appended {successes_added} success(es) and "
                 f"{failures_added} failure(s) for run {run_id} "
-                f"({duplicates_skipped} duplicate(s) skipped)."
+                f"({duplicates_skipped} duplicate(s) skipped"
+                f"{f', {db_dedup_skipped} cross-worker DB duplicate(s) skipped' if db_dedup_skipped else ''})."
             )
         return True
 
@@ -428,8 +436,14 @@ class KBUpdater:
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_outcome ON attempt_trajectories(outcome)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_run ON attempt_trajectories(run_id)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_model ON attempt_trajectories(victim_model)")
-        # UNIQUE index is the second safety net for Constraint 2 (dedup). The
-        # in-memory seen_keys set is the first; this guards concurrent workers.
+        # UNIQUE index is the authoritative safety net for Constraint 2 (dedup).
+        # The in-memory seen_keys set (per-process, loaded once from the JSONL) is
+        # the fast-path first layer — it catches within-worker duplicates. But it
+        # CANNOT see keys inserted by other workers sharing this DB, so the UNIQUE
+        # index is the cross-worker guard. _insert_trajectory uses INSERT OR IGNORE
+        # so a cross-worker dedup_key collision is skipped gracefully (the row is
+        # already canonical) instead of raising sqlite3.IntegrityError and crashing
+        # the worker.
         self._conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup ON attempt_trajectories(dedup_key)"
         )
@@ -456,15 +470,27 @@ class KBUpdater:
         git_commit: str = "unknown",
         defense_complexity: str = "unknown",
         access_granted: bool = False,
-    ) -> None:
+    ) -> bool:
+        """Insert one attempt trajectory row.
+
+        Returns True if the row was actually inserted, False if it was skipped
+        by the DB dedup layer (``INSERT OR IGNORE`` on the ``idx_dedup`` UNIQUE
+        index). A skip means another worker already inserted the same
+        ``dedup_key`` — exactly the dedup intent — so we treat it as success,
+        not an error. This is the cross-worker safety net: the in-memory
+        ``seen_keys`` set is per-process and cannot see keys inserted by other
+        workers sharing this DB, so the UNIQUE index is the authoritative
+        guard and ``OR IGNORE`` makes it tolerant instead of crashing with
+        ``sqlite3.IntegrityError``.
+        """
         victim_response = attempt.get("victim", {}).get("clean_output", "")
         best_candidate = attempt.get("extractor", {}).get("best_candidate", "")
 
         outcome = "SUCCESS" if is_positive else self._attempt_failure_reason(attempt)
 
-        self._conn.execute(
+        cur = self._conn.execute(
             """
-            INSERT INTO attempt_trajectories (
+            INSERT OR IGNORE INTO attempt_trajectories (
                 run_id, scenario_id, defense_type, access_code_type, attempt_number,
                 strategy, attack, victim_response, best_candidate, verification_success,
                 ground_truth_found, extractor_match, outcome, source_file, timestamp,
@@ -496,6 +522,7 @@ class KBUpdater:
                 defense_complexity,
             ),
         )
+        return cur.rowcount > 0
 
     def _db_commit(self) -> None:
         if self._db_initialized:
