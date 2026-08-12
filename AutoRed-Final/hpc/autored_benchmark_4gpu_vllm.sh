@@ -548,13 +548,42 @@ else
 fi
 
 # =============================================================================
+# Post-benchmark KB/RAG rebuild (single-process, post-merge)
+# =============================================================================
+# In multi-worker runs each worker is a separate OS process, so the per-worker
+# update_after_benchmark() deliberately NO-OPs the rebuild (concurrent FAISS /
+# SQLite / JSON writes are unsafe). This step fires the rebuild ONCE, after all
+# workers exited and their results merged — the only safe single-process point.
+# Gated on --update-kb benchmark|all (skip for off|run). Non-fatal: a rebuild
+# hiccup must never mask a successful benchmark. Uses $PYTHON_BIN (the .venv
+# python) so build_rag_index gets faiss + sentence_transformers.
+RUN_DIR="$(dirname "$LOGS_DIR")"
+if [[ "$UPDATE_KB" == "benchmark" || "$UPDATE_KB" == "all" ]]; then
+    echo ""
+    echo "[REBUILD] Rebuilding KB, oracle, and RAG index from merged results..."
+    if "$PYTHON_BIN" -m scripts.rebuild_kb_rag \
+        --data-dir data --results-dir "$RUN_DIR"
+    then
+        echo "[REBUILD] KB/RAG stores refreshed (data/strategy_knowledge_base.json, oracle_rules.json, rag/)."
+    else
+        echo "[WARN] KB/RAG rebuild failed — benchmark results are still valid." >&2
+        echo "       Re-run manually: $PYTHON_BIN -m scripts.rebuild_kb_rag --data-dir data --results-dir \"$RUN_DIR\"" >&2
+    fi
+else
+    echo ""
+    echo "[REBUILD] Skipped (--update-kb=$UPDATE_KB; rebuild only runs for benchmark|all)."
+    echo "         For multi-worker runs, refresh stores manually afterward:"
+    echo "         $PYTHON_BIN -m scripts.rebuild_kb_rag --data-dir data --results-dir \"$RUN_DIR\""
+fi
+
+# =============================================================================
 # Auto-run the benchmark analysis report
 # =============================================================================
 # Runs immediately after a successful merge so every finished benchmark lands
 # with an analysis.md next to its merged_summary.json. Non-fatal: a report
-# hiccup must never mask a successful benchmark. run_dir is the parent of
-# LOGS_DIR (the worker JSONs/logs live under <run_dir>/logs/).
-RUN_DIR="$(dirname "$LOGS_DIR")"
+# hiccup must never mask a successful benchmark. RUN_DIR is the parent of
+# LOGS_DIR (the worker JSONs/logs live under <run_dir>/logs/); already set
+# above for the rebuild step.
 echo ""
 echo "[ANALYSIS] Generating benchmark report..."
 if "$PYTHON_BIN" scripts/analyze_benchmark_comparison.py --run-dir "$RUN_DIR"; then

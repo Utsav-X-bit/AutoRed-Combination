@@ -150,7 +150,11 @@ class KBUpdater:
                 gen = attempt.get("generator", {})
                 strategy = gen.get("strategy", "unknown")
                 attack = gen.get("generated_attack", "")
-                verification_success = bool(attempt.get("verification_success", False))
+                # verification_success is a NESTED flag at attempt["verification"]["success"],
+                # NOT a top-level key — the old `attempt.get("verification_success")` read a
+                # nonexistent key and always returned False, silently demoting every
+                # verified-only (encoded-form) win out of Tier-1. Read it defensively.
+                verification_success = bool((attempt.get("verification") or {}).get("success", False))
                 ground_truth_found = bool(attempt.get("ground_truth_found", False))
                 extractor_match = bool(attempt.get("extractor_match", False))
                 access_granted = self._access_granted(attempt)
@@ -550,7 +554,9 @@ class KBUpdater:
         if len(clean_out) < 60:
             return "VICTIM_NO_LEAK"
 
-        if attempt.get("ground_truth_found") and not attempt.get("verification_success"):
+        # Same nested-read fix as the labeler: verification_success lives at
+        # attempt["verification"]["success"], not the top level.
+        if attempt.get("ground_truth_found") and not (attempt.get("verification") or {}).get("success", False):
             return "VERIFIER_REJECT"
 
         return "STRATEGY_WRONG"

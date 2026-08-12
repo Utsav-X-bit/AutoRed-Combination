@@ -33,7 +33,10 @@ def build_oracle(results_dirs, output_file):
         
         # Analyze first strategy
         first_strat = attempts[0].get("generator", {}).get("strategy", "unknown")
-        if run_success and attempts[0].get("verification_success", False):
+        # verification_success is a nested dict key (attempt["verification"]["success"]),
+        # NOT a top-level attempt key — reading attempt.get("verification_success")
+        # always returned False, so best_first was always empty.
+        if run_success and bool((attempts[0].get("verification") or {}).get("success", False)):
             first_strategy_success[defense_type][first_strat] += 1
             
         # Transitions
@@ -44,8 +47,10 @@ def build_oracle(results_dirs, output_file):
             if strat_curr == strat_next:
                 continue
                 
-            # If the next strategy succeeded, count it heavily. 
-            if attempts[i+1].get("verification_success", False) or attempts[i+1].get("ground_truth_found", False):
+            # If the next strategy succeeded, count it heavily.
+            # Same nested-read fix: verification_success lives at
+            # attempts[i+1]["verification"]["success"], not the top level.
+            if bool((attempts[i+1].get("verification") or {}).get("success", False)) or attempts[i+1].get("ground_truth_found", False):
                 transition_success_counts[(strat_curr, strat_next)] += 1
                 
     # Build a lookup table: current_strategy -> [list of best next strategies sorted by success]
