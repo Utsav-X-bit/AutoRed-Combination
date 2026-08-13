@@ -82,6 +82,15 @@ class KBUpdater:
         # DB is created lazily so enabling the updater without producing any runs
         # does not leave empty artifacts behind.
         self._db_initialized = False
+        # SQLite trajectory DB is a SECONDARY store. The authoritative read-path
+        # source is the JSONL (autored_successes_v1.jsonl / autored_failures_v1.jsonl)
+        # — the post-benchmark rebuild (rebuild_kb_rag.py) reads JSONL, not the DB.
+        # So if the DB ever fails to initialize (WAL on NFS, locking, disk I/O),
+        # we mark it unavailable and skip all DB writes while the JSONL appends —
+        # the authoritative path — proceed regardless. This decouples the
+        # secondary DB from the primary JSONL so a DB issue can never crash a
+        # benchmark or lose data. See _ensure_db / _insert_trajectory / _db_commit.
+        self._db_available = True
 
         # Content-hash dedup set (Constraint 2 — no duplicate data). Loaded lazily
         # from the existing successes file so we skip appends we've already seen.
@@ -390,8 +399,54 @@ class KBUpdater:
         if self._db_initialized:
             return
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, timeout=30.0)
-        self._conn.execute("PRAGMA journal_mode=WAL;")
+        try:
+            self._conn = sqlite3.connect(self.db_path, timeout=30.0)
+            # WAL mode needs mmap-backed shared memory (*-shm file) + POSIX fcntl
+            # advisory locking. On a network filesystem (NFS — this repo lives on
+            # /nlsasfs/...) those are unsupported and sqlite raises
+            # `OperationalError: locking protocol` at the shm lock acquisition.
+            # Compounded by 4 worker processes per node (×2 nodes = 8 processes)
+            # racing the same data/autored_kb.db. Fall back to DELETE
+            # (rollback-journal mode, no *-shm file, SQLite default) which is
+            # safe on NFS for a single connection's DDL. The UNIQUE idx_dedup
+            # still gives cross-worker dedup; INSERT OR IGNORE keeps it tolerant.
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL;")
+            except sqlite3.OperationalError as exc:
+                if self.verbose:
+                    print(
+                        f"[KB] WAL journal mode unavailable ({exc}); "
+                        "falling back to DELETE mode. This is expected on NFS/"
+                        "network filesystems and under multi-process concurrency."
+                    )
+                try:
+                    self._conn.execute("PRAGMA journal_mode=DELETE;")
+                except sqlite3.OperationalError:
+                    # Even DELETE failed — leave the connection in its default
+                    # rollback-journal mode (the connect() default). Don't
+                    # re-raise; the CREATE TABLE/INSERT below can still proceed.
+                    pass
+            self._init_db_schema()
+        except sqlite3.Error as exc:
+            # The SQLite trajectory DB is a SECONDARY store. The authoritative
+            # read-path source is the JSONL (autored_successes_v1.jsonl /
+            # autored_failures_v1.jsonl); rebuild_kb_rag.py reads JSONL, not the
+            # DB. So a DB init failure must NOT abort the run or block the JSONL
+            # appends — mark the DB unavailable and let _insert_trajectory /
+            # _db_commit no-op. This keeps the benchmark alive (the live crash
+            # symptom) while the authoritative JSONL path keeps working.
+            if self.verbose:
+                print(
+                    f"[KB] SQLite trajectory DB unavailable ({exc}); "
+                    "skipping DB writes. JSONL appends (authoritative) continue."
+                )
+            self._db_available = False
+            self._conn = None
+        self._db_initialized = True
+
+    def _init_db_schema(self) -> None:
+        """Create the trajectory table + indexes. Split out so _ensure_db can
+        isolate the WAL/locking concerns from the schema DDL."""
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS attempt_trajectories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -487,50 +542,71 @@ class KBUpdater:
         guard and ``OR IGNORE`` makes it tolerant instead of crashing with
         ``sqlite3.IntegrityError``.
         """
+        # If the DB failed to initialize (WAL/NFS/locking — see _ensure_db),
+        # no-op: the authoritative JSONL append already captured the record.
+        if not self._db_available:
+            return False
         victim_response = attempt.get("victim", {}).get("clean_output", "")
         best_candidate = attempt.get("extractor", {}).get("best_candidate", "")
 
         outcome = "SUCCESS" if is_positive else self._attempt_failure_reason(attempt)
 
-        cur = self._conn.execute(
-            """
-            INSERT OR IGNORE INTO attempt_trajectories (
-                run_id, scenario_id, defense_type, access_code_type, attempt_number,
-                strategy, attack, victim_response, best_candidate, verification_success,
-                ground_truth_found, extractor_match, outcome, source_file, timestamp,
-                victim_model, dedup_key, git_commit, access_granted, extractor_success,
-                defense_complexity, schema_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)
-            """,
-            (
-                run_id,
-                scenario_id,
-                defense_type,
-                access_code_type,
-                attempt_number,
-                strategy,
-                attack,
-                victim_response,
-                best_candidate,
-                int(verification_success),
-                int(ground_truth_found),
-                int(extractor_match),
-                outcome,
-                source_file,
-                timestamp,
-                victim_model,
-                dedup_key,
-                git_commit,
-                int(access_granted),
-                int(extractor_match),
-                defense_complexity,
-            ),
-        )
-        return cur.rowcount > 0
+        try:
+            cur = self._conn.execute(
+                """
+                INSERT OR IGNORE INTO attempt_trajectories (
+                    run_id, scenario_id, defense_type, access_code_type, attempt_number,
+                    strategy, attack, victim_response, best_candidate, verification_success,
+                    ground_truth_found, extractor_match, outcome, source_file, timestamp,
+                    victim_model, dedup_key, git_commit, access_granted, extractor_success,
+                    defense_complexity, schema_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)
+                """,
+                (
+                    run_id,
+                    scenario_id,
+                    defense_type,
+                    access_code_type,
+                    attempt_number,
+                    strategy,
+                    attack,
+                    victim_response,
+                    best_candidate,
+                    int(verification_success),
+                    int(ground_truth_found),
+                    int(extractor_match),
+                    outcome,
+                    source_file,
+                    timestamp,
+                    victim_model,
+                    dedup_key,
+                    git_commit,
+                    int(access_granted),
+                    int(extractor_match),
+                    defense_complexity,
+                ),
+            )
+            return cur.rowcount > 0
+        except sqlite3.Error as exc:
+            # A transient DB error (NFS hiccup, lock timeout, disk I/O) on a
+            # SECONDARY store must never crash the run. The authoritative JSONL
+            # append already captured the record. Log once and degrade.
+            if self.verbose:
+                print(
+                    f"[KB] SQLite insert skipped ({exc}); JSONL append is "
+                    "authoritative. Continuing."
+                )
+            self._db_available = False
+            return False
 
     def _db_commit(self) -> None:
-        if self._db_initialized:
-            self._conn.commit()
+        if self._db_initialized and self._db_available:
+            try:
+                self._conn.commit()
+            except sqlite3.Error as exc:
+                if self.verbose:
+                    print(f"[KB] SQLite commit skipped ({exc}); continuing.")
+                self._db_available = False
 
     def close(self) -> None:
         if self._db_initialized:
