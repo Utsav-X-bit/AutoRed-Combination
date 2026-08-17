@@ -1,29 +1,36 @@
 #!/usr/bin/env bash
 #
-# sync_results_drive.sh — archive the current results/ tree to a dated zip and
-# push it to Google Drive, then delete the local zip.
+# sync_results_drive.sh — stage results/ onto fast RAID storage, zip it there,
+# push the zip to Google Drive, then delete the staged tree + zip from the RAID.
+#
+# WHY RAID STAGING
+#   Zipping directly on the network filesystem (NFS) is too slow. So the tree
+#   is first rsync'd to a local RAID volume, zipped there (fast), pushed to
+#   Drive, and the RAID copies are removed once the upload is verified.
 #
 # WHAT IT DOES
-#   1. Zips the local AutoRed-Final/results/ tree (the new results-layout output:
-#      results/benchmark/<model>/<chars>/{logs,runs}/...) into a dated file:
-#        results_<YYYYMMDD_HHMMSS>.zip
-#   2. Uploads that zip to gdrive:<REMOTE_RESULTS_DIR>/ via rclone.
-#   3. Deletes the local zip (Drive is now the source of truth for that archive).
-#
-# By default only results/benchmark/ (the canonical output) is zipped, NOT
-# results_bak/ (the 1.4G legacy archive). Use --include-bak to also archive
-# results_bak/ (large; slow over Drive).
+#   1. rsync's AutoRed-Final/results/ → $RAID_STAGING/results/ (fast local disk).
+#   2. (with --merge-bak) also rsync's AutoRed-Final/results_bak/ →
+#      $RAID_STAGING/results_bak/ (the 1.4G legacy archive; off by default).
+#   3. Zips each staged tree ON THE RAID into dated files:
+#        results_<YYYYMMDD_HHMMSS>.zip          (always)
+#        results_bak_<YYYYMMDD_HHMMSS>.zip      (only with --merge-bak)
+#   4. Uploads each zip to gdrive:<REMOTE_RESULTS_DIR>/ via rclone, verifying
+#      the file actually landed on the remote.
+#   5. After each verified upload: deletes that zip AND its staged tree from
+#      the RAID (Drive is now the source of truth for that archive).
 #
 # Run this AFTER a benchmark finishes (e.g. call it from the tail of
 # hpc/autored_benchmark_4gpu_vllm.sh, or manually). One-directional: local→Drive.
 #
 # USAGE
-#   ./sync_results_drive.sh                  # archive results/ → Drive, rm local zip
-#   ./sync_results_drive.sh --include-bak    # also include results_bak/
-#   ./sync_results_drive.sh --dry-run        # zip + show what would be pushed, don't upload
+#   ./sync_results_drive.sh                  # results/ → RAID → zip → Drive → clean RAID
+#   ./sync_results_drive.sh --merge-bak      # also copy + zip + push results_bak/
+#   ./sync_results_drive.sh --dry-run        # stage + zip on RAID, show what would be
+#                                            # pushed, don't upload, keep RAID copies
 #   ./sync_results_drive.sh --help
 #
-# REQUIRES: rclone configured with a remote named 'gdrive' (run `rclone config`).
+# REQUIRES: rclone (remote 'gdrive'), rsync, zip.
 
 set -euo pipefail
 
@@ -33,6 +40,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTORED_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"           # AutoRed-Final/
 RESULTS_DIR="${AUTORED_DIR}/results"                  # new-layout output tree
+BAK_DIR="${AUTORED_DIR}/results_bak"                  # legacy 1.4G backup tree
+# Fast local staging volume (zip happens HERE, not on the network fs).
+RAID_STAGING_DIR="${RAID_STAGING_DIR:-/raid/user-45839/AutoRed-Combination}"
 REMOTE="gdrive"
 REMOTE_RESULTS_DIR="AutoRed-Combination/results"      # gdrive:<this>/results_*.zip
 # Pin the rclone root to a *shared* Google Drive folder by ID so both you and a
@@ -43,6 +53,7 @@ REMOTE_RESULTS_DIR="AutoRed-Combination/results"      # gdrive:<this>/results_*.
 DRIVE_ROOT_FOLDER_ID="14TP-ANowJkqYMLJsPFcdQz_ZVB4wPytz"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 ZIP_NAME="results_${STAMP}.zip"
+BAK_ZIP_NAME="results_bak_${STAMP}.zip"
 
 # Flags appended to EVERY rclone call (kept as an array to survive --dry-run
 # previews and to stay quoting-safe). Empty if no root-folder pin is set.
@@ -53,19 +64,22 @@ RCLONE_ROOT_FLAGS=()
 # ---------------------------------------------------------------------------
 print_help() {
   cat << 'HELP'
-sync_results_drive.sh — archive results/ to a dated zip and push to Google Drive.
+sync_results_drive.sh — stage results/ on fast RAID, zip there, push to Drive,
+then clean the RAID. (Zipping directly on network storage is too slow.)
 
 USAGE:
   ./sync_results_drive.sh [OPTIONS]
 
 OPTIONS:
-  --include-bak     Also archive results_bak/ (the legacy 1.4G backup). Off by
-                    default — only results/ (the new-layout benchmark output) is
-                    zipped, keeping each archive small.
-  --dry-run         Build the zip and show what would be uploaded, but skip the
-                    actual rclone upload and the local-zip cleanup.
+  --merge-bak       Also rsync + zip + push results_bak/ (the legacy 1.4G
+                    backup) as results_bak_<timestamp>.zip. Off by default —
+                    only results/ (the new-layout benchmark output) is archived,
+                    keeping the main archive small.
+  --dry-run         Stage + zip on the RAID and show what would be uploaded,
+                    but skip the rclone upload and the RAID cleanup (RAID
+                    copies are kept).
   --remote NAME     rclone remote to use (default: gdrive).
-  --remote-dir P     Remote directory under the pinned folder (default: AutoRed-Combination/results).
+  --remote-dir P    Remote directory under the pinned folder (default: AutoRed-Combination/results).
   --root-folder-id  Google Drive folder ID to pin as rclone's root. Defaults to
                     a SHARED folder so you and a coworker (each on your own
                     'gdrive' account) write to the same place. Pass a different
@@ -74,24 +88,76 @@ OPTIONS:
   --help, -h        Show this help.
 
 ENV:
-  Results dir:  AutoRed-Final/results/  (new layout: benchmark/<model>/<chars>/...)
-  Remote path:  gdrive:AutoRed-Combination/results/<results_TIMESTAMP>.zip
-                (resolved relative to the pinned shared folder — see --root-folder-id)
+  Results dir:   AutoRed-Final/results/       (new layout: benchmark/<model>/<chars>/...)
+  Bak dir:       AutoRed-Final/results_bak/   (legacy, only with --merge-bak)
+  RAID staging:  /raid/user-45839/AutoRed-Combination
+                 (override with RAID_STAGING_DIR=/path)
+  Remote path:   gdrive:AutoRed-Combination/results/<results_TIMESTAMP>.zip
+                 (resolved relative to the pinned shared folder — see --root-folder-id)
 
 NOTES:
-  - The local zip is deleted after a confirmed upload (Drive = source of truth).
-  - Use --dry-run to preview the archive size and remote path without uploading.
-  - Requires rclone with a 'gdrive' remote (run `rclone config` to set up).
+  - Staged trees + zips are deleted from the RAID only after the upload is
+    verified. On any failure the RAID copies are preserved for a re-push.
+  - rsync uses --delete so the RAID staging is an exact mirror of the source
+    (stale files from a previous failed run do not leak into the archive).
+  - Requires rclone with a 'gdrive' remote (run `rclone config` to set up),
+    plus rsync and zip.
   - Both you and your coworker must have access to the pinned shared folder.
 HELP
 }
 
-INCLUDE_BAK=0
+# Upload one zip to Drive, verify it, then clean it + its staged tree(s) from
+# the RAID. Usage: push_zip <zip-path> <staged-tree> [staged-tree ...]
+# On failure: prints an error, preserves the RAID copies, and exits 1.
+push_zip() {
+  local zip_path="$1"; shift
+  local zip_name cleanup
+  zip_name="$(basename "$zip_path")"
+  local remote_dir="${REMOTE}:${REMOTE_RESULTS_DIR}/"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    (dry-run) would run: rclone copy \"${zip_path}\" \"${remote_dir}\" --progress ${RCLONE_ROOT_FLAGS[*]}"
+    for cleanup in "$@"; do
+      echo "    (dry-run) keeping on RAID: ${zip_path} and ${cleanup}"
+    done
+    return 0
+  fi
+
+  echo "    Uploading ${zip_name} → ${remote_dir}"
+  if ! rclone copy "${zip_path}" "${remote_dir}" --progress "${RCLONE_ROOT_FLAGS[@]}"; then
+    echo "error: rclone upload failed for ${zip_name}. RAID copies preserved:" >&2
+    echo "       zip: ${zip_path}" >&2
+    for cleanup in "$@"; do echo "       staged: ${cleanup}" >&2; done
+    echo "       re-run this script (rsync is incremental), or push manually." >&2
+    exit 1
+  fi
+
+  # Verify the upload: confirm ${zip_name} exists as a FILE in the remote dir.
+  # --files-only prevents a folder-with-the-same-name from passing as
+  # "uploaded" (the earlier bug: rclone made results_<ts>.zip/ a directory).
+  if ! rclone lsf "${remote_dir}" --files-only "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null | grep -qx "${zip_name}"; then
+    echo "error: upload verification failed — ${zip_name} not found as a file on remote." >&2
+    echo "       (if a directory named ${zip_name} exists, delete it: rclone purge \"${REMOTE}:${REMOTE_RESULTS_DIR}/${zip_name}/\" ${RCLONE_ROOT_FLAGS[*]})" >&2
+    echo "       RAID copies preserved: ${zip_path}" >&2
+    exit 1
+  fi
+
+  echo "    Upload verified — removing from RAID: ${zip_name} + staged tree(s)"
+  rm -f "${zip_path}"
+  for cleanup in "$@"; do
+    rm -rf "${cleanup}"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
+MERGE_BAK=0
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --include-bak)   INCLUDE_BAK=1; shift ;;
+    --merge-bak)     MERGE_BAK=1; shift ;;
     --dry-run)       DRY_RUN=1; shift ;;
     --remote)        REMOTE="$2"; shift 2 ;;
     --remote-dir)    REMOTE_RESULTS_DIR="$2"; shift 2 ;;
@@ -112,100 +178,106 @@ fi
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
-if ! command -v rclone >/dev/null 2>&1; then
-  echo "error: rclone not found. Install it and run 'rclone config' to add a 'gdrive' remote." >&2
-  exit 1
-fi
-if ! command -v zip >/dev/null 2>&1; then
-  echo "error: zip not found." >&2; exit 1
-fi
+for tool in rclone rsync zip; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "error: $tool not found (required by this script)." >&2
+    exit 1
+  fi
+done
 if [[ ! -d "$RESULTS_DIR" ]]; then
   echo "error: results dir not found: $RESULTS_DIR" >&2
   exit 1
 fi
 if [[ ! -d "$RESULTS_DIR/benchmark" ]]; then
   echo "warn: $RESULTS_DIR/benchmark/ not found — nothing to archive?" >&2
-  echo "       (the new layout writes to results/benchmark/<model>/<chars>/)" >&2
+  echo "      (the new layout writes to results/benchmark/<model>/<chars>/)" >&2
+fi
+if ! mkdir -p "$RAID_STAGING_DIR"; then
+  echo "error: cannot create RAID staging dir: $RAID_STAGING_DIR" >&2
+  exit 1
+fi
+if [[ ! -w "$RAID_STAGING_DIR" ]]; then
+  echo "error: RAID staging dir not writable: $RAID_STAGING_DIR" >&2
+  exit 1
 fi
 
-ZIP_PATH="${AUTORED_DIR}/${ZIP_NAME}"
+RAID_RESULTS="${RAID_STAGING_DIR}/results"
+RAID_BAK="${RAID_STAGING_DIR}/results_bak"
+ZIP_PATH="${RAID_STAGING_DIR}/${ZIP_NAME}"
+BAK_ZIP_PATH="${RAID_STAGING_DIR}/${BAK_ZIP_NAME}"
 
 # ---------------------------------------------------------------------------
-# Build the zip
+# [1/3] Stage on RAID (fast local disk) via rsync
 # ---------------------------------------------------------------------------
-echo "[1/3] Archiving results/ → ${ZIP_NAME}"
-# Zip relative to AUTORED_DIR so the archive root is 'results/' (+ optional
-# 'results_bak/'). -q for quiet, -r for recursive, -y to store symlinks as-is.
-ZIP_ARGS=(-qr "$ZIP_PATH")
-ZIP_TARGETS=("results")
-if [[ "$INCLUDE_BAK" -eq 1 ]]; then
-  if [[ -d "${AUTORED_DIR}/results_bak" ]]; then
-    ZIP_TARGETS+=("results_bak")
-    echo "      (including results_bak/ — archive may be large)"
+echo "[1/3] Staging on RAID: ${RAID_STAGING_DIR}/"
+echo "      rsync results/ → ${RAID_RESULTS}/"
+# --delete: make the staging dir an exact mirror so stale files from a
+# previous interrupted run cannot leak into the archive.
+rsync -a --delete --info=progress2 "$RESULTS_DIR" "$RAID_STAGING_DIR/"
+
+if [[ "$MERGE_BAK" -eq 1 ]]; then
+  if [[ -d "$BAK_DIR" ]]; then
+    echo "      rsync results_bak/ → ${RAID_BAK}/"
+    rsync -a --delete --info=progress2 "$BAK_DIR" "$RAID_STAGING_DIR/"
   else
-    echo "      --include-bak given but results_bak/ missing; skipping it"
+    echo "      --merge-bak given but $BAK_DIR missing; skipping it"
+    MERGE_BAK=0
   fi
 fi
 
-( cd "$AUTORED_DIR" && zip "${ZIP_ARGS[@]}" "${ZIP_TARGETS[@]}" )
-
+# ---------------------------------------------------------------------------
+# [2/3] Zip ON THE RAID (not on network storage)
+# ---------------------------------------------------------------------------
+echo "[2/3] Zipping on RAID (fast local disk)"
+# Zip relative to the staging dir so the archive root is 'results/'
+# (+ optional 'results_bak/'). -q quiet, -r recursive, -y store symlinks as-is.
+( cd "$RAID_STAGING_DIR" && zip -qry "${ZIP_NAME}" results )
 if [[ ! -f "$ZIP_PATH" ]]; then
   echo "error: zip creation failed — $ZIP_PATH not found" >&2
   exit 1
 fi
-ZIP_SIZE=$(du -h "$ZIP_PATH" | cut -f1)
-echo "      zip size: ${ZIP_SIZE}"
+echo "      ${ZIP_NAME}: $(du -h "$ZIP_PATH" | cut -f1)"
 echo "      file count in results/: $(find "$RESULTS_DIR" -type f | wc -l)"
 
+if [[ "$MERGE_BAK" -eq 1 ]]; then
+  ( cd "$RAID_STAGING_DIR" && zip -qry "${BAK_ZIP_NAME}" results_bak )
+  if [[ ! -f "$BAK_ZIP_PATH" ]]; then
+    echo "error: bak zip creation failed — $BAK_ZIP_PATH not found" >&2
+    exit 1
+  fi
+  echo "      ${BAK_ZIP_NAME}: $(du -h "$BAK_ZIP_PATH" | cut -f1)"
+fi
+
 # ---------------------------------------------------------------------------
-# Upload (unless dry-run)
+# [3/3] Push each zip to Drive, verify, clean the RAID
 # ---------------------------------------------------------------------------
-REMOTE_PATH="${REMOTE}:${REMOTE_RESULTS_DIR}/${ZIP_NAME}"
-# IMPORTANT: rclone copy's destination must be the *directory* (with trailing
-# slash), NOT the full file path. `rclone copy file.zip remote:dir/file.zip`
-# treats `file.zip` as a directory and nests the file inside it
-# (dir/file.zip/file.zip). Copying into `remote:dir/` lands the file as
-# dir/file.zip — a real file, which is what the pull script's matcher expects.
-REMOTE_DIR="${REMOTE}:${REMOTE_RESULTS_DIR}/"
+echo "[3/3] Pushing to ${REMOTE}:${REMOTE_RESULTS_DIR}/"
+if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 && "$DRY_RUN" -eq 0 ]]; then
+  echo "      (pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})"
+fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  echo "[2/3] (dry-run) would run: rclone copy \"${ZIP_PATH}\" \"${REMOTE_DIR}\" --progress ${RCLONE_ROOT_FLAGS[*]}"
-  echo "      (zip kept locally: ${ZIP_PATH})"
-  echo "      (no upload, no local cleanup)"
-  echo "[3/3] done (dry-run)"
+  echo "      (dry-run — no upload, no RAID cleanup)"
+fi
+
+push_zip "$ZIP_PATH" "$RAID_RESULTS"
+if [[ "$MERGE_BAK" -eq 1 ]]; then
+  push_zip "$BAK_ZIP_PATH" "$RAID_BAK"
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "done (dry-run). Nothing uploaded; RAID staging kept for inspection:"
+  echo "  ${RAID_STAGING_DIR}/"
   exit 0
 fi
 
-echo "[2/3] Uploading to ${REMOTE_PATH}"
-if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
-  echo "      (pinned to shared folder id: ${DRIVE_ROOT_FOLDER_ID})"
+echo "done. Archived ${ZIP_NAME} to ${REMOTE}:${REMOTE_RESULTS_DIR}/${ZIP_NAME}"
+if [[ "$MERGE_BAK" -eq 1 ]]; then
+  echo "      archived ${BAK_ZIP_NAME} to ${REMOTE}:${REMOTE_RESULTS_DIR}/${BAK_ZIP_NAME}"
 fi
-if ! rclone copy "${ZIP_PATH}" "${REMOTE_DIR}" --progress "${RCLONE_ROOT_FLAGS[@]}"; then
-  echo "error: rclone upload failed. Local zip preserved: ${ZIP_PATH}" >&2
-  echo "       re-run, or upload manually." >&2
-  exit 1
-fi
-
-# Verify the upload: confirm ${ZIP_NAME} exists as a FILE in the remote dir.
-# Using --files-only prevents a folder-with-the-same-name from passing as
-# "uploaded" (the earlier bug: rclone made results_<ts>.zip/ a directory).
-if ! rclone lsf "${REMOTE_DIR}" --files-only "${RCLONE_ROOT_FLAGS[@]}" 2>/dev/null | grep -qx "${ZIP_NAME}"; then
-  echo "error: upload verification failed — ${ZIP_NAME} not found as a file on remote." >&2
-  echo "       (if a directory named ${ZIP_NAME} exists, delete it: rclone purge \"${REMOTE_PATH}/\" ${RCLONE_ROOT_FLAGS[*]})" >&2
-  echo "       local zip preserved: ${ZIP_PATH}" >&2
-  exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Clean up local zip
-# ---------------------------------------------------------------------------
-echo "[3/3] Upload verified — deleting local zip"
-rm -f "$ZIP_PATH"
-echo "done. Archived ${ZIP_NAME} to ${REMOTE_PATH}"
-echo
 if [[ "${#RCLONE_ROOT_FLAGS[@]}" -gt 0 ]]; then
   echo "List archives:  rclone lsf ${REMOTE}:${REMOTE_RESULTS_DIR}/ --drive-root-folder-id ${DRIVE_ROOT_FOLDER_ID}"
 else
   echo "List archives:  rclone lsf ${REMOTE}:${REMOTE_RESULTS_DIR}/"
 fi
 echo "Pull latest:     ./sync_results_local.sh"
-echo "Pull a specific: ./sync_results_local.sh results_${STAMP}.zip"
+echo "Pull a specific: ./sync_results_local.sh ${ZIP_NAME}"

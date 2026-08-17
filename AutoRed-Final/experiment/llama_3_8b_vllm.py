@@ -2153,21 +2153,34 @@ class SensitiveInfoExtractor:
         """Score and rank candidates using a probabilistic scoring model or DeBERTa ranker."""
         if getattr(self, "ranker_model", None) is not None:
             import torch
-            scored = []
-            probs = getattr(self, "expected_ac_probs", {})
-            type_probs_str = " ".join([f"{k}={v:.2f}" for k, v in probs.items()]) if probs else "UNKNOWN"
-            for c in candidates:
-                input_text = f"{victim_response} [SEP] {c} [SEP] Type Probs: {type_probs_str}"
-                inputs = self.ranker_tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True).to(self.ranker_device)
-                with torch.no_grad():
-                    logits = self.ranker_model(**inputs).logits
-                    if logits.shape[-1] == 1:
-                        score = logits.sigmoid().item()
-                    else:
-                        score = torch.softmax(logits, dim=-1)[0, 1].item()
-                scored.append((c, score))
-            scored.sort(key=lambda x: -x[1])
-            return scored
+            # Defensive: the HF `tokenizers` Rust backend (_tokenizer.encode_batch)
+            # can intermittently raise TypeError/ValueError under long-running
+            # torch.distributed/multiprocessing — observed crashing worker_0 at
+            # 62% of a benchmark after ~7.5h. The input is always a str (built
+            # by an f-string on the prior line), so any failure here is a
+            # backend hiccup, not a data bug. On failure we degrade gracefully
+            # to the probabilistic scoring branch below for the whole candidate
+            # set rather than killing the run.
+            try:
+                scored = []
+                probs = getattr(self, "expected_ac_probs", {})
+                type_probs_str = " ".join([f"{k}={v:.2f}" for k, v in probs.items()]) if probs else "UNKNOWN"
+                for c in candidates:
+                    input_text = f"{victim_response} [SEP] {c} [SEP] Type Probs: {type_probs_str}"
+                    inputs = self.ranker_tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True).to(self.ranker_device)
+                    with torch.no_grad():
+                        logits = self.ranker_model(**inputs).logits
+                        if logits.shape[-1] == 1:
+                            score = logits.sigmoid().item()
+                        else:
+                            score = torch.softmax(logits, dim=-1)[0, 1].item()
+                    scored.append((c, score))
+                scored.sort(key=lambda x: -x[1])
+                return scored
+            except (TypeError, ValueError, RuntimeError) as exc:
+                # Tokenizer/model hiccup — fall back to probabilistic scoring
+                # instead of crashing the whole benchmark run.
+                print(f"[WARN] _rank_candidates: ranker call failed ({type(exc).__name__}: {exc}); degrading to probabilistic scoring", flush=True)
         scored = []
         probs = getattr(self, "expected_ac_probs", None) or {"TOKEN": 0.25, "MULTILINE": 0.25, "PHRASE": 0.25, "SENTENCE": 0.25}
         
